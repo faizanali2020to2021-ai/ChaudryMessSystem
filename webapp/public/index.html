@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chaudry Mess System - Expense & Reports Management</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='%232E5C4E'/><text x='50' y='68' font-size='50' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>C</text></svg>">
+</head>
+<body>
+
+  <!-- Fullscreen Login View (Shows first whenever application opens) -->
+  <div id="login-modal" class="modal-overlay" style="display: flex; background: linear-gradient(135deg, rgba(46,92,78,0.96) 0%, rgba(27,28,30,0.96) 100%); z-index: 9999;">
+    <div class="modal-content" style="max-width: 420px; text-align: center; padding: 36px 28px; border: none; box-shadow: 0 25px 60px rgba(0,0,0,0.45);">
+      <div style="width: 72px; height: 72px; background: #2E5C4E; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: 800; margin: 0 auto 16px auto; box-shadow: 0 6px 16px rgba(0,0,0,0.25);">C</div>
+      <h2 id="login-shop-name" style="font-size: 24px; font-weight: 800; margin-bottom: 4px; color: var(--text-dark);">Chaudry Mess System</h2>
+      <p id="login-shop-address" style="font-size: 13px; color: var(--text-muted); margin-bottom: 22px;">Food Expense Manager & Reports</p>
+      
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <!-- User Type / Account Selector -->
+        <div class="form-group" style="text-align: left; margin-bottom: 14px;">
+          <label class="form-label" for="login-username">Select User Type</label>
+          <select id="login-username" class="form-control" style="width: 100%; font-size: 14px; font-weight: 600;" onchange="handleUserTypeChange()">
+            <option value="admin">Admin (Full Access & All Operations)</option>
+            <option value="user">User (Data Entry Only - No Delete)</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="text-align: left; margin-bottom: 14px;">
+          <label class="form-label" for="login-password">Password</label>
+          <input type="password" id="login-password" class="form-control" style="width: 100%;" placeholder="Enter password" required autofocus>
+        </div>
+
+        <div id="login-error" style="color: var(--red-text); background: var(--red-bg); padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 14px; display: none;"></div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; padding: 13px; font-size: 15px; font-weight: 700;">Login to System</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main App Container -->
+  <div class="app-container" id="app-container">
+    
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">C</div>
+        <div class="sidebar-title" style="flex: 1; min-width: 0;">
+          <h2 id="app-shop-name" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Chaudry Mess System</h2>
+          <p id="app-shop-address" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Mess Expense Manager</p>
+          <div id="sidebar-user-role" style="font-size: 11px; margin-top: 4px; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,0.22); display: inline-block; font-weight: 600;">👑 Admin (Full Access)</div>
+        </div>
+        <button class="sidebar-hide-btn" onclick="toggleSidebar()" title="Hide Sidebar" aria-label="Hide Sidebar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+        </button>
+      </div>
+      
+      <nav class="sidebar-nav">
+        <div class="nav-item active" onclick="switchView('dashboard')">
+          <span class="nav-icon">📊</span>
+          <span>Dashboard</span>
+        </div>
+        <div class="nav-item" onclick="switchView('expenses')">
+          <span class="nav-icon">🧾</span>
+          <span>Expenses List</span>
+        </div>
+        <div class="nav-item" onclick="openExpenseModal()">
+          <span class="nav-icon">➕</span>
+          <span>Add Expense</span>
+        </div>
+        <div class="nav-item" onclick="switchView('persons')">
+          <span class="nav-icon">👥</span>
+          <span>Persons</span>
+        </div>
+        <div class="nav-item" onclick="switchView('reports')">
+          <span class="nav-icon">📑</span>
+          <span>Reports (6)</span>
+        </div>
+        
+        <div class="nav-divider"></div>
+        
+        <div class="nav-item" id="nav-settings" onclick="switchView('settings')">
+          <span class="nav-icon">⚙️</span>
+          <span>Settings & Backup</span>
+        </div>
+        <div class="nav-item" onclick="openChangePasswordModal()">
+          <span class="nav-icon">🔒</span>
+          <span>Change Password</span>
+        </div>
+        <div class="nav-item" onclick="toggleTheme()">
+          <span class="nav-icon" id="theme-icon">🌓</span>
+          <span id="theme-text">Dark Mode</span>
+        </div>
+        
+        <div class="nav-divider"></div>
+        
+        <div class="nav-item" onclick="handleLogout()" style="color: var(--red-text);">
+          <span class="nav-icon">🚪</span>
+          <span>Logout</span>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Mobile Sidebar Backdrop Overlay -->
+    <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleSidebar()"></div>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      
+      <!-- Top App Bar -->
+      <header class="top-bar">
+        <div class="top-bar-left">
+          <button class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle Sidebar" aria-label="Toggle Sidebar">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+          <h1 class="page-title" id="page-title">Dashboard</h1>
+        </div>
+        <div class="top-bar-right">
+          <span id="user-role-badge" class="badge badge-green" style="font-size: 13px; font-weight: 700; padding: 6px 12px;">👑 Admin</span>
+          <button class="btn btn-secondary btn-sm" onclick="toggleTheme()">🌓 Theme</button>
+          <button class="btn btn-primary btn-sm" onclick="openExpenseModal()">+ Add Expense</button>
+        </div>
+      </header>
+
+      <!-- Page Body Container -->
+      <div class="page-body">
+
+        <!-- 1. DASHBOARD VIEW -->
+        <section id="view-dashboard" class="app-view">
+          <!-- Overall Stats -->
+          <div class="stat-cards-grid">
+            <div class="stat-card blue">
+              <span class="stat-label">Total Expense</span>
+              <span class="stat-value" id="dash-total-expense">Rs. 0.00</span>
+            </div>
+            <div class="stat-card green">
+              <span class="stat-label">Total Paid</span>
+              <span class="stat-value" id="dash-total-paid">Rs. 0.00</span>
+            </div>
+          </div>
+
+          <!-- Section: Persons -->
+          <div class="section-header">
+            <h2 class="section-title">Persons</h2>
+            <button class="btn btn-secondary btn-sm" onclick="openPersonModal()">+ Add Person</button>
+          </div>
+
+          <!-- Person Summary Boxes Grid -->
+          <div class="persons-grid" id="dashboard-persons-grid">
+            <!-- Dynamic PersonSummaryBox cards -->
+          </div>
+        </section>
+
+        <!-- 2. EXPENSES LIST VIEW -->
+        <section id="view-expenses" class="app-view" style="display: none;">
+          <div class="filters-bar">
+            <input type="text" id="expense-search" class="form-control" placeholder="Search description or person..." style="flex: 1; min-width: 200px;" oninput="debounceFilterExpenses()">
+            
+            <select id="expense-filter-person" class="form-control" onchange="loadExpenses()">
+              <option value="">All Persons</option>
+            </select>
+
+            <select id="expense-sort-by" class="form-control" onchange="loadExpenses()">
+              <option value="date_desc">Newest First</option>
+              <option value="date_asc">Oldest First</option>
+              <option value="amount_desc">Amount: High to Low</option>
+              <option value="amount_asc">Amount: Low to High</option>
+            </select>
+
+            <button class="btn btn-primary" onclick="openExpenseModal()">+ Add Expense</button>
+          </div>
+
+          <div class="table-container">
+            <table class="app-table" id="expenses-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Description</th>
+                  <th>Category</th>
+                  <th>Paid By</th>
+                  <th style="text-align: right;">Amount (Rs.)</th>
+                  <th style="text-align: center;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="expenses-table-body">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 3. PERSONS MANAGEMENT VIEW -->
+        <section id="view-persons" class="app-view" style="display: none;">
+          <div class="section-header">
+            <h2 class="section-title">Mess Members & Participants</h2>
+            <button class="btn btn-primary" onclick="openPersonModal()">+ Add New Person</button>
+          </div>
+
+          <div class="table-container">
+            <table class="app-table" id="persons-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Name</th>
+                  <th>Mobile Number (WhatsApp)</th>
+                  <th>Status</th>
+                  <th style="text-align: center;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="persons-table-body">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 4. REPORTS VIEW (ALL 6 REPORTS) -->
+        <section id="view-reports" class="app-view" style="display: none;">
+          
+          <!-- Report Selector Tabs -->
+          <div class="report-tabs">
+            <button class="report-tab-btn active" onclick="switchReportTab('total-expense')">1. Total Expense</button>
+            <button class="report-tab-btn" onclick="switchReportTab('paid-by-person')">2. Paid by Person</button>
+            <button class="report-tab-btn" onclick="switchReportTab('person-ledger')">3. Person Ledger</button>
+            <button class="report-tab-btn" onclick="switchReportTab('person-detail-ledger')">4. Detail Ledger</button>
+            <button class="report-tab-btn" onclick="switchReportTab('day-wise')">5. Day-Wise Expense</button>
+            <button class="report-tab-btn" onclick="switchReportTab('group-summary')">6. Group Summary & Settlement</button>
+          </div>
+
+          <!-- Report Filters Container -->
+          <div class="filters-bar" id="report-filters-bar">
+            <!-- Filter inputs adapt based on chosen report tab -->
+            <div id="filter-date-group" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+              <label style="font-size: 13px; font-weight: 600;">From:</label>
+              <input type="date" id="report-from-date" class="form-control">
+              <label style="font-size: 13px; font-weight: 600;">To:</label>
+              <input type="date" id="report-to-date" class="form-control">
+            </div>
+
+            <div id="filter-person-group" style="display: none; align-items: center; gap: 8px;">
+              <label style="font-size: 13px; font-weight: 600;">Member:</label>
+              <select id="report-person-select" class="form-control" style="min-width: 180px;">
+                <!-- dynamic options -->
+              </select>
+            </div>
+
+            <button class="btn btn-primary" onclick="generateActiveReport()">Generate Report</button>
+            <button class="btn btn-secondary" onclick="printReport()">🖨️ Print / PDF</button>
+            <button class="btn btn-secondary" onclick="exportReportCSV()">📥 Export CSV</button>
+            <button class="btn btn-whatsapp" id="report-wa-share-btn" style="display: none;" onclick="shareReportWhatsApp()">💬 Share on WhatsApp</button>
+          </div>
+
+          <!-- Report Document Container (Formatted matching PdfReportGenerator.kt) -->
+          <div class="report-view-container" id="printable-report">
+            
+            <!-- Standard Header Banner -->
+            <div class="report-header-banner">
+              <div class="report-banner-left">
+                <div class="report-logo-badge" id="report-logo-char">C</div>
+                <div class="report-banner-title">
+                  <h2 id="report-doc-shop-name">Chaudry Mess System</h2>
+                  <p id="report-doc-subtitle">Expense Report</p>
+                  <div id="report-doc-address" style="font-size: 11px; opacity: 0.85; margin-top: 2px;"></div>
+                </div>
+              </div>
+              <div class="report-banner-meta">
+                <div id="report-doc-date">Generated: 01 Oct 2026</div>
+                <div style="font-size: 11px; opacity: 0.8;">Chaudry Mess Application</div>
+              </div>
+            </div>
+
+            <!-- Dynamic Report Content Inserted Here -->
+            <div id="report-content-body">
+              <!-- Content generated dynamically -->
+            </div>
+
+            <!-- Standard Shared Footer matching mobile app -->
+            <div class="report-footer">
+              <div>Prepared By <strong>M Shahzaib</strong></div>
+              <div class="report-footer-whatsapp">
+                <span class="wa-dot">📞</span>
+                <span>+923709497498</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 5. SETTINGS & BACKUP VIEW -->
+        <section id="view-settings" class="app-view" style="display: none;">
+          <div class="section-header">
+            <h2 class="section-title">System Settings & SQL Server Database</h2>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
+            <!-- Company / Shop Identity Settings -->
+            <div class="report-view-container">
+              <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Company / Shop Identity</h3>
+              <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">This name and address appears on the top bar, sidebar, and in the header of all printed reports and PDFs.</p>
+              
+              <div class="form-group">
+                <label class="form-label">Company / Shop / Mess Name</label>
+                <input type="text" id="settings-shop-name" class="form-control" style="width: 100%; font-weight: 600;" placeholder="e.g. Chaudry Mess System" required>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Company / Shop Address</label>
+                <textarea id="settings-shop-address" class="form-control" style="width: 100%; height: 80px;" placeholder="e.g. Near Civil Hospital, Main Road..."></textarea>
+              </div>
+
+              <button class="btn btn-primary" onclick="saveShopIdentity()">Save Company / Shop Details</button>
+              <div id="settings-identity-msg" style="margin-top: 10px; font-size: 13px;"></div>
+            </div>
+
+            <!-- SQL Server 2014 Database & Backup -->
+            <div class="report-view-container">
+              <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Microsoft SQL Server 2014 Backup</h3>
+              <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">Take native SQL Server backup (.bak) of the <span style="font-family: monospace; font-weight: bold;">ChaudryMessDB</span> database.</p>
+              
+              <div style="background: var(--zebra); padding: 14px; border-radius: var(--radius-md); font-size: 13px; margin-bottom: 16px;">
+                <div><strong>Server Instance:</strong> localhost (MSSQLSERVER 2014)</div>
+                <div><strong>Database:</strong> ChaudryMessDB</div>
+                <div id="sql-table-counts" style="margin-top: 6px;">Loading record counts...</div>
+              </div>
+
+              <button class="btn btn-primary" onclick="createDatabaseBackup()">Create Database Backup (.bak)</button>
+              <div id="backup-result-msg" style="margin-top: 10px; font-size: 13px;"></div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- ADD / EDIT EXPENSE MODAL -->
+  <div id="expense-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" id="expense-modal-title">Add Expense</h3>
+        <button class="modal-close" onclick="closeExpenseModal()">&times;</button>
+      </div>
+      <form id="expense-form" onsubmit="saveExpense(event)">
+        <input type="hidden" id="expense-edit-id" value="">
+        <div class="modal-body">
+          
+          <div class="form-group">
+            <label class="form-label">Date</label>
+            <input type="date" id="expense-input-date" class="form-control" style="width: 100%;" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <input type="text" id="expense-input-desc" class="form-control" style="width: 100%;" placeholder="e.g. Dinner Chicken Karahi, Sabzi, Milk, etc." required>
+          </div>
+
+          <!-- Category Tags (Breakfast, Lunch, Dinner, Others) -->
+          <div class="form-group">
+            <label class="form-label">Category (Optional meal tag)</label>
+            <div class="category-chips">
+              <button type="button" class="category-chip" data-category="Breakfast" onclick="toggleCategoryChip(this)">Breakfast</button>
+              <button type="button" class="category-chip" data-category="Lunch" onclick="toggleCategoryChip(this)">Lunch</button>
+              <button type="button" class="category-chip" data-category="Dinner" onclick="toggleCategoryChip(this)">Dinner</button>
+              <button type="button" class="category-chip" data-category="Others" onclick="toggleCategoryChip(this)">Others</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Amount (Rs.)</label>
+            <input type="number" step="0.01" min="0.01" id="expense-input-amount" class="form-control" style="width: 100%; font-size: 18px; font-weight: bold;" placeholder="0.00" oninput="updateLiveSplitCalculation(); updateCustomSplitSummary(); updateMultiPayerSummary();" required>
+          </div>
+
+          <div class="form-group">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <label class="form-label" style="margin-bottom:0;">Paid By</label>
+              <!-- Payer mode toggle -->
+              <div class="split-mode-toggle">
+                <button type="button" id="payer-mode-single-btn" class="split-mode-btn active" onclick="setPayerMode('single')">💰 Single</button>
+                <button type="button" id="payer-mode-multi-btn" class="split-mode-btn" onclick="setPayerMode('multi')">👥 Multi</button>
+              </div>
+            </div>
+
+            <!-- Single payer dropdown -->
+            <div id="payer-single-section">
+              <select id="expense-input-paid-by" class="form-control" style="width: 100%;" required>
+                <!-- Populated dynamically -->
+              </select>
+            </div>
+
+            <!-- Multi payer inputs -->
+            <div id="payer-multi-section" style="display:none;">
+              <div class="split-persons-box" id="multi-payer-list">
+                <!-- Dynamically populated -->
+              </div>
+              <div style="margin-top:8px; padding:8px 12px; border-radius:8px; font-size:13px; background:var(--bg-secondary);">
+                <div style="display:flex; justify-content:space-between;">
+                  <span>Total Expense:</span>
+                  <strong id="multi-payer-total-expense">Rs. 0.00</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span>Sum Entered:</span>
+                  <strong id="multi-payer-entered">Rs. 0.00</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:4px; font-weight:bold;">
+                  <span>Remaining:</span>
+                  <strong id="multi-payer-remaining" style="color:var(--danger)">Rs. 0.00</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <label class="form-label" style="margin-bottom: 0;">Split Among Members</label>
+              <!-- Split Mode Toggle -->
+              <div class="split-mode-toggle">
+                <button type="button" id="split-mode-equal-btn" class="split-mode-btn active" onclick="setSplitMode('equal')">⚖️ Equal</button>
+                <button type="button" id="split-mode-custom-btn" class="split-mode-btn" onclick="setSplitMode('custom')">✏️ Custom</button>
+              </div>
+            </div>
+
+            <!-- Select All / Clear (only in equal mode) -->
+            <div id="split-select-all-row" style="display: flex; gap: 6px; margin-bottom: 6px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(true)">Select All</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(false)">Clear</button>
+            </div>
+            
+            <div class="split-persons-box" id="split-persons-list">
+              <!-- Dynamically populated checkboxes or custom inputs -->
+            </div>
+
+            <!-- Live split indicator (equal mode) -->
+            <div class="live-split-preview" id="live-split-preview">
+              <span>Per Person Share:</span>
+              <strong id="live-split-amount">Rs. 0.00</strong>
+            </div>
+
+            <!-- Custom split total validation (custom mode) -->
+            <div id="custom-split-summary" style="display:none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: var(--bg-secondary);">
+              <div style="display:flex; justify-content:space-between;">
+                <span>Total Expense:</span>
+                <strong id="custom-split-total-expense">Rs. 0.00</strong>
+              </div>
+              <div style="display:flex; justify-content:space-between;">
+                <span>Sum Entered:</span>
+                <strong id="custom-split-entered">Rs. 0.00</strong>
+              </div>
+              <div style="display:flex; justify-content:space-between; margin-top: 4px; font-weight: bold;">
+                <span>Remaining:</span>
+                <strong id="custom-split-remaining" style="color: var(--danger)">Rs. 0.00</strong>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeExpenseModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="expense-submit-btn">Save Expense</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ADD / EDIT PERSON MODAL -->
+  <div id="person-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="person-modal-title">Add Person</h3>
+        <button class="modal-close" onclick="closePersonModal()">&times;</button>
+      </div>
+      <form id="person-form" onsubmit="savePerson(event)">
+        <input type="hidden" id="person-edit-id" value="">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Person / Member Name</label>
+            <input type="text" id="person-input-name" class="form-control" style="width: 100%;" placeholder="e.g. Shahzaib, Ali, etc." required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Mobile Number (E.164 with country code)</label>
+            <input type="text" id="person-input-mobile" class="form-control" style="width: 100%;" placeholder="e.g. +923001234567">
+            <span style="font-size: 11px; color: var(--text-muted);">Used for one-click WhatsApp ledger delivery.</span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closePersonModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Member</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- CHANGE PASSWORD MODAL -->
+  <div id="password-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 420px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Change Password</h3>
+        <button class="modal-close" onclick="closeChangePasswordModal()">&times;</button>
+      </div>
+      <form id="password-form" onsubmit="saveNewPassword(event)">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Current Password</label>
+            <input type="password" id="pw-current" class="form-control" style="width: 100%;" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">New Password (Min 6 characters)</label>
+            <input type="password" id="pw-new" class="form-control" style="width: 100%;" minlength="6" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Confirm New Password</label>
+            <input type="password" id="pw-confirm" class="form-control" style="width: 100%;" minlength="6" required>
+          </div>
+          <div id="pw-error" style="color: var(--red-text); font-size: 13px; display: none;"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeChangePasswordModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Update Password</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- CENTERED BEAUTIFUL DELETE CONFIRMATION & PREVENTION MODAL -->
+  <div id="delete-dialog-modal" class="modal-overlay" style="display: none;" onclick="handleDeleteOverlayClick(event)">
+    <div class="centered-dialog" id="delete-dialog-box">
+      <div id="dialog-icon-wrapper" class="dialog-icon-circle danger">🗑️</div>
+      <h3 class="dialog-title" id="dialog-title">Delete Member</h3>
+      <div class="dialog-subtitle" id="dialog-person-name">Member Name</div>
+      <p class="dialog-message" id="dialog-message">Are you sure you want to delete this member?</p>
+      
+      <div class="dialog-info-card" id="dialog-info-card" style="display: none;">
+        <div class="dialog-info-row">
+          <span>Expenses Paid by Member:</span>
+          <span class="dialog-info-badge badge-red" id="dialog-paid-count">0</span>
+        </div>
+        <div class="dialog-info-row">
+          <span>Expense Shares Allocated:</span>
+          <span class="dialog-info-badge badge-red" id="dialog-share-count">0</span>
+        </div>
+      </div>
+
+      <div class="dialog-actions" id="dialog-actions">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTERED BEAUTIFUL LOGOUT CONFIRMATION MODAL -->
+  <div id="logout-dialog-modal" class="modal-overlay" style="display: none;" onclick="handleLogoutOverlayClick(event)">
+    <div class="centered-dialog">
+      <div class="dialog-icon-circle danger">🚪</div>
+      <h3 class="dialog-title">Log Out</h3>
+      <div class="dialog-subtitle" id="logout-shop-title">Chaudry Mess System</div>
+      <p class="dialog-message">Are you sure you want to end your current session and log out?</p>
+      
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeLogoutModal()">Cancel</button>
+        <button type="button" class="btn btn-danger" onclick="confirmLogout()">Yes, Log Out</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
