@@ -41,21 +41,26 @@ function getLocalIP() {
   return 'localhost';
 }
 
-// Start server and verify TiDB / Database connection on 0.0.0.0 (all network cards)
-app.listen(PORT, '0.0.0.0', async () => {
-  const localIP = getLocalIP();
-  console.log(`====================================================`);
-  console.log(` Chaudry Mess Web Application is running!`);
-  console.log(` Local URL   : http://localhost:${PORT}`);
-  console.log(` Network URL : http://${localIP}:${PORT} (For other PCs/mobiles on WiFi)`);
-  console.log(` Connecting to Database...`);
-  try {
-    const pool = await getPool();
-    console.log(` Database status : Online & Ready!`);
-  } catch (err) {
-    console.error(` Database Connection Warning:`, err.message);
-  }
-  console.log(`====================================================`);
-});
+// Start server if run directly (not as a module on Vercel/Serverless)
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  app.listen(PORT, '0.0.0.0', async () => {
+    const localIP = getLocalIP();
+    console.log(`====================================================`);
+    console.log(` Chaudry Mess Web Application is running!`);
+    console.log(` Local URL   : http://localhost:${PORT}`);
+    console.log(` Network URL : http://${localIP}:${PORT} (For other PCs/mobiles on WiFi)`);
+    console.log(` Connecting to Database...`);
+    try {
+      const pool = await getPool();
+      console.log(` Database status : Online & Ready!`);
+    } catch (err) {
+      console.error(` Database Connection Warning:`, err.message);
+    }
+    console.log(`====================================================`);
+  });
+}
+
+module.exports = app;
+
 
 

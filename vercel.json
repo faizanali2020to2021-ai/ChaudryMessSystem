@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/webapp/public/$1"
+    }
+  ],
+  "env": {
+    "DB_TYPE": "tidb",
+    "DB_HOST": "gateway01.ap-southeast-1.prod.aws.tidbcloud.com",
+    "DB_PORT": "4000",
+    "DB_NAME": "ChaudryMessDB",
+    "DB_USER": "3YVo31KzxKYfe1q.root",
+    "DB_PASSWORD": "n46M8KNMHV60dTMP",
+    "DB_SSL": "true",
+    "DB_SSL_REJECT_UNAUTHORIZED": "false"
+  }
+}
