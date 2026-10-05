@@ -1,0 +1,20 @@
+{
+  "name": "chaudry-mess-system",
+  "version": "1.0.0",
+  "description": "Chaudry Mess System - Cloud Web Application with TiDB",
+  "main": "webapp/server/index.js",
+  "scripts": {
+    "start": "node webapp/server/index.js",
+    "build": "cd webapp && npm install"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "mysql2": "^3.12.0"
+  }
+}

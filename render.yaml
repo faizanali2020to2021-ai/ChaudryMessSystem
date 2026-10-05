@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: chaudry-mess-system
+    env: node
+    plan: free
+    buildCommand: cd webapp && npm install
+    startCommand: node webapp/server/index.js
+    envVars:
+      - key: DB_TYPE
+        value: tidb
+      - key: DB_HOST
+        value: gateway01.ap-southeast-1.prod.aws.tidbcloud.com
+      - key: DB_PORT
+        value: "4000"
+      - key: DB_NAME
+        value: ChaudryMessDB
+      - key: DB_USER
+        value: 3YVo31KzxKYfe1q.root
+      - key: DB_PASSWORD
+        value: n46M8KNMHV60dTMP
+      - key: DB_SSL
+        value: "true"
+      - key: DB_SSL_REJECT_UNAUTHORIZED
+        value: "false"
