@@ -7,7 +7,7 @@
     },
     {
       "source": "/(.*)",
-      "destination": "/webapp/public/$1"
+      "destination": "/public/$1"
     }
   ],
   "env": {
