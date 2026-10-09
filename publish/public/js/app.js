@@ -1933,3 +1933,451 @@ async function saveNewPassword(e) {
     errEl.style.display = 'block';
   }
 }
+
+// =============================================================================
+// AI VOICE ASSISTANT ENGINE (Zero-Install Web Speech & NLP Action Dispatcher)
+// =============================================================================
+let aiRecognition = null;
+let isAILocalListening = false;
+let aiCurrentLanguage = 'ur-PK'; // Default Urdu (supports English seamlessly)
+
+function initAISpeechEngine() {
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRec) {
+    console.log('Web Speech API is not supported in this browser.');
+    return null;
+  }
+  const rec = new SpeechRec();
+  rec.continuous = false;
+  rec.interimResults = true;
+  rec.lang = aiCurrentLanguage;
+
+  rec.onstart = () => {
+    isAILocalListening = true;
+    updateAIModalState();
+  };
+
+  rec.onresult = (event) => {
+    let interim = '';
+    let final = '';
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        final += event.results[i][0].transcript;
+      } else {
+        interim += event.results[i][0].transcript;
+      }
+    }
+    const liveTextEl = document.getElementById('ai-live-text');
+    if (liveTextEl) {
+      liveTextEl.textContent = `"${final || interim || '...'}"`;
+    }
+    if (final && final.trim()) {
+      executeAICommand(final.trim());
+    }
+  };
+
+  rec.onerror = (event) => {
+    console.warn('AI Speech recognition error:', event.error);
+    isAILocalListening = false;
+    updateAIModalState();
+    const statusEl = document.getElementById('ai-status-text');
+    if (statusEl) {
+      if (event.error === 'not-allowed') {
+        statusEl.textContent = '❌ مائیکروفون کی اجازت نہیں ملی۔ براؤزر سیٹنگ سے مائیک آن کریں۔';
+      } else if (event.error === 'no-speech') {
+        statusEl.textContent = 'کوئی آواز نہیں سنی گئی۔ دوبارہ کوشش کریں۔';
+      } else {
+        statusEl.textContent = `کوشش دوبارہ کریں (${event.error})`;
+      }
+    }
+  };
+
+  rec.onend = () => {
+    isAILocalListening = false;
+    updateAIModalState();
+  };
+
+  return rec;
+}
+
+function toggleAIAssistant() {
+  const modal = document.getElementById('ai-assistant-modal');
+  if (!modal) return;
+  if (modal.style.display === 'flex') {
+    closeAIAssistant();
+  } else {
+    openAIAssistant();
+  }
+}
+
+function openAIAssistant() {
+  const modal = document.getElementById('ai-assistant-modal');
+  if (modal) modal.style.display = 'flex';
+  const input = document.getElementById('ai-manual-command-input');
+  if (input) input.value = '';
+  const feedback = document.getElementById('ai-feedback-banner');
+  if (feedback) feedback.style.display = 'none';
+  const statusEl = document.getElementById('ai-status-text');
+  if (statusEl) statusEl.textContent = 'مائیک بٹن دبائیں یا بولیں: "نیا خرچہ کھولو" / "Open Expense"';
+  const liveEl = document.getElementById('ai-live-text');
+  if (liveEl) liveEl.textContent = '"بولنے کا انتظار ہے..."';
+  
+  // Auto start listening on open
+  setTimeout(() => startVoiceListening(), 150);
+}
+
+function closeAIAssistant() {
+  stopVoiceListening();
+  const modal = document.getElementById('ai-assistant-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function handleAIOverlayClick(e) {
+  if (e.target && e.target.id === 'ai-assistant-modal') {
+    closeAIAssistant();
+  }
+}
+
+function toggleAILanguage() {
+  aiCurrentLanguage = (aiCurrentLanguage === 'ur-PK') ? 'en-US' : 'ur-PK';
+  const btn = document.getElementById('ai-lang-btn');
+  if (btn) {
+    btn.textContent = (aiCurrentLanguage === 'ur-PK') ? '🇵🇰 Urdu / EN' : '🇬🇧 English / Urdu';
+  }
+  if (isAILocalListening) {
+    stopVoiceListening();
+    setTimeout(() => startVoiceListening(), 250);
+  }
+}
+
+function toggleVoiceListening() {
+  if (isAILocalListening) {
+    stopVoiceListening();
+  } else {
+    startVoiceListening();
+  }
+}
+
+function startVoiceListening() {
+  try {
+    if (!aiRecognition) {
+      aiRecognition = initAISpeechEngine();
+    }
+    if (aiRecognition) {
+      aiRecognition.lang = aiCurrentLanguage;
+      aiRecognition.start();
+    } else {
+      const statusEl = document.getElementById('ai-status-text');
+      if (statusEl) statusEl.textContent = 'براؤزر وائس سپورٹ نہیں کرتا۔ نیچے ٹیکسٹ ٹائپ کریں۔';
+    }
+  } catch (err) {
+    console.warn('Voice start error:', err);
+  }
+}
+
+function stopVoiceListening() {
+  if (aiRecognition && isAILocalListening) {
+    try { aiRecognition.stop(); } catch (_) {}
+  }
+  isAILocalListening = false;
+  updateAIModalState();
+}
+
+function updateAIModalState() {
+  const micBtn = document.getElementById('ai-big-mic-btn');
+  const vis = document.getElementById('ai-visualizer');
+  const box = document.getElementById('ai-transcript-box');
+  const hint = document.getElementById('ai-mic-hint');
+  const statusEl = document.getElementById('ai-status-text');
+
+  if (isAILocalListening) {
+    if (micBtn) micBtn.classList.add('active');
+    if (vis) vis.classList.add('ai-listening');
+    if (box) box.classList.add('listening');
+    if (hint) hint.textContent = '🎙️ بولیں، میں سن رہا ہوں... (Listening)';
+    if (statusEl) statusEl.textContent = 'Listening... بولیں...';
+  } else {
+    if (micBtn) micBtn.classList.remove('active');
+    if (vis) vis.classList.remove('ai-listening');
+    if (box) box.classList.remove('listening');
+    if (hint) hint.textContent = 'مائیک پر کلک کر کے بولنا شروع کریں';
+  }
+}
+
+function handleManualAICommand(e) {
+  e.preventDefault();
+  const input = document.getElementById('ai-manual-command-input');
+  if (!input) return;
+  const cmd = input.value.trim();
+  if (cmd) {
+    executeAICommand(cmd);
+    input.value = '';
+  }
+}
+
+function showAIFeedback(msg, isSuccess = true) {
+  const fb = document.getElementById('ai-feedback-banner');
+  if (fb) {
+    fb.style.display = 'block';
+    fb.style.background = isSuccess ? '#DFF5E4' : '#FBE1E1';
+    fb.style.color = isSuccess ? '#0F5C25' : '#8A1616';
+    fb.style.borderColor = isSuccess ? '#bcebc5' : '#f5c4c4';
+    fb.innerHTML = msg;
+  }
+  const statusEl = document.getElementById('ai-status-text');
+  if (statusEl) statusEl.textContent = isSuccess ? '⚡ Action Completed!' : '⚠️ Could not execute command';
+}
+
+// Convert Urdu/Arabic digits and spoken words to standard numbers
+function parseSpokenAmount(rawText) {
+  if (!rawText) return null;
+  let text = rawText.toString().toLowerCase();
+
+  // Convert Urdu/Arabic numerals
+  const urduNums = { '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9' };
+  text = text.replace(/[۰-۹]/g, c => urduNums[c] || c);
+
+  // Check word numbers
+  let wordAmount = 0;
+  if (text.includes('ہزار') || text.includes('thousand')) {
+    const match = text.match(/(\d+)\s*(ہزار|thousand)/);
+    if (match) wordAmount += parseInt(match[1], 10) * 1000;
+    else wordAmount += 1000;
+  }
+  if (text.includes('پانچ سو') || text.includes('panch sau') || text.includes('500')) return 500;
+  if (text.includes('ڈیڑھ سو') || text.includes('dedh sau') || text.includes('150')) return 150;
+  if (text.includes('ڈھائی سو') || text.includes('dhai sau') || text.includes('250')) return 250;
+  if (text.includes('تین سو') || text.includes('teen sau') || text.includes('300')) return 300;
+  if (text.includes('چار سو') || text.includes('char sau') || text.includes('400')) return 400;
+  if (text.includes('چھ سو') || text.includes('che sau') || text.includes('600')) return 600;
+  if (text.includes('سات سو') || text.includes('sat sau') || text.includes('700')) return 700;
+  if (text.includes('آٹھ سو') || text.includes('aath sau') || text.includes('800')) return 800;
+  if (text.includes('نو سو') || text.includes('nau sau') || text.includes('900')) return 900;
+  if (text.includes('ایک سو') || text.includes('ek sau') || text.includes('100')) return 100;
+  if (text.includes('دو سو') || text.includes('do sau') || text.includes('200')) return 200;
+
+  if (wordAmount > 0) return wordAmount;
+
+  // Standard regex number extraction
+  const numMatch = text.match(/(\d+(\.\d+)?)/);
+  if (numMatch) {
+    return parseFloat(numMatch[1]);
+  }
+  return null;
+}
+
+// Find matching person from state.persons
+function matchPerson(text) {
+  if (!text || !state.persons || state.persons.length === 0) return null;
+  const clean = text.toLowerCase();
+
+  for (const p of state.persons) {
+    const pName = (p.name || '').toLowerCase();
+    if (clean.includes(pName)) return p;
+    // Split multi-word names
+    const parts = pName.split(/\s+/);
+    for (const part of parts) {
+      if (part.length >= 3 && clean.includes(part)) return p;
+    }
+  }
+  return null;
+}
+
+// NLP Action Dispatcher
+function executeAICommand(rawCommand) {
+  if (!rawCommand || !rawCommand.trim()) return;
+  const cmd = rawCommand.trim().toLowerCase();
+  const originalText = rawCommand.trim();
+
+  const liveTextEl = document.getElementById('ai-live-text');
+  if (liveTextEl) liveTextEl.textContent = `"${originalText}"`;
+
+  // 1. NAVIGATION COMMANDS
+  // Dashboard
+  if (cmd.includes('dashboard') || cmd.includes('ڈیش بورڈ') || cmd.includes('home') || cmd.includes('ہوم') || cmd.includes('مین پیج')) {
+    switchView('dashboard');
+    showAIFeedback('✅ Dashboard opened!');
+    setTimeout(() => closeAIAssistant(), 1000);
+    return;
+  }
+
+  // Reports
+  if (cmd.includes('report') || cmd.includes('رپورٹ') || cmd.includes('رپورٹس') || cmd.includes('لیجر')) {
+    if (cmd.includes('print') || cmd.includes('پرنٹ')) {
+      switchView('reports');
+      setTimeout(() => {
+        printReport();
+        showAIFeedback('🖨️ Printing Report...');
+        setTimeout(() => closeAIAssistant(), 1000);
+      }, 500);
+      return;
+    }
+    if (cmd.includes('whatsapp') || cmd.includes('واٹس ایپ') || cmd.includes('شیئر')) {
+      switchView('reports');
+      setTimeout(() => {
+        shareReportWhatsApp();
+        showAIFeedback('💬 Opening WhatsApp share...');
+        setTimeout(() => closeAIAssistant(), 1000);
+      }, 500);
+      return;
+    }
+    if (cmd.includes('summary') || cmd.includes('سمری') || cmd.includes('group') || cmd.includes('گروپ')) {
+      switchView('reports');
+      switchReportTab('group-summary');
+      showAIFeedback('📊 Group Summary Report opened!');
+      setTimeout(() => closeAIAssistant(), 1000);
+      return;
+    }
+    if (cmd.includes('day') || cmd.includes('دن') || cmd.includes('روزانہ') || cmd.includes('روز')) {
+      switchView('reports');
+      switchReportTab('day-wise');
+      showAIFeedback('📅 Day-Wise Report opened!');
+      setTimeout(() => closeAIAssistant(), 1000);
+      return;
+    }
+    switchView('reports');
+    showAIFeedback('📑 Reports opened!');
+    setTimeout(() => closeAIAssistant(), 1000);
+    return;
+  }
+
+  // Persons / Members
+  if (cmd.includes('person') || cmd.includes('member') || cmd.includes('ممبر') || cmd.includes('افراد') || cmd.includes('پرسن')) {
+    if (cmd.includes('add') || cmd.includes('نیا') || cmd.includes('شامل')) {
+      openPersonModal();
+      showAIFeedback('👥 Add Member form opened!');
+      setTimeout(() => closeAIAssistant(), 1000);
+      return;
+    }
+    switchView('persons');
+    showAIFeedback('👥 Members list opened!');
+    setTimeout(() => closeAIAssistant(), 1000);
+    return;
+  }
+
+  // Settings & Theme
+  if (cmd.includes('theme') || cmd.includes('dark') || cmd.includes('light') || cmd.includes('ڈارک') || cmd.includes('نائٹ')) {
+    toggleTheme();
+    showAIFeedback('🌓 Theme toggled!');
+    setTimeout(() => closeAIAssistant(), 1000);
+    return;
+  }
+
+  if (cmd.includes('password') || cmd.includes('پاس ورڈ')) {
+    openChangePasswordModal();
+    showAIFeedback('🔒 Change Password opened!');
+    setTimeout(() => closeAIAssistant(), 1000);
+    return;
+  }
+
+  if (cmd.includes('setting') || cmd.includes('سیٹنگ') || cmd.includes('backup') || cmd.includes('بیک اپ')) {
+    switchView('settings');
+    showAIFeedback('⚙️ Settings opened!');
+    setTimeout(() => closeAIAssistant(), 1000);
+    return;
+  }
+
+  // 2. PAYMENT RECEIVE COMMANDS
+  if (cmd.includes('payment') || cmd.includes('پیمنٹ') || cmd.includes('وصولی') || cmd.includes('receive') || cmd.includes('ادائیگی')) {
+    openPaymentModal();
+    const amt = parseSpokenAmount(cmd);
+    if (amt) {
+      const amtInput = document.getElementById('payment-input-amount');
+      if (amtInput) amtInput.value = amt;
+    }
+
+    // Try finding paid by and received by persons
+    const foundPersons = [];
+    if (state.persons && state.persons.length > 0) {
+      for (const p of state.persons) {
+        if (cmd.includes((p.name || '').toLowerCase())) {
+          foundPersons.push(p);
+        }
+      }
+    }
+    if (foundPersons.length >= 1) {
+      const paidBySel = document.getElementById('payment-input-paid-by');
+      if (paidBySel) paidBySel.value = foundPersons[0].id;
+    }
+    if (foundPersons.length >= 2) {
+      const recBySel = document.getElementById('payment-input-received-by');
+      if (recBySel) recBySel.value = foundPersons[1].id;
+    }
+
+    showAIFeedback('💳 Payment Receive Form opened' + (amt ? ` with Rs. ${amt}` : '') + '!');
+    setTimeout(() => closeAIAssistant(), 1200);
+    return;
+  }
+
+  // 3. EXPENSE SMART AUTO-FILL COMMANDS
+  // Check if speech contains expense keywords, amounts, categories or names
+  const amt = parseSpokenAmount(cmd);
+  const matchedPerson = matchPerson(cmd);
+
+  let detectedCategory = 'Other';
+  let detectedDesc = '';
+
+  if (cmd.includes('ناشتہ') || cmd.includes('breakfast') || cmd.includes('paratha') || cmd.includes('انڈا') || cmd.includes('چائے') || cmd.includes('chai') || cmd.includes('روٹی') || cmd.includes('roti')) {
+    detectedCategory = 'Breakfast';
+    detectedDesc = 'Breakfast (ناشتہ)';
+  } else if (cmd.includes('دوپہر') || cmd.includes('lunch') || cmd.includes('بریانی') || cmd.includes('biryani') || cmd.includes('دال') || cmd.includes('سبزی')) {
+    detectedCategory = 'Lunch';
+    detectedDesc = 'Lunch (دوپہر کا کھانا)';
+  } else if (cmd.includes('رات') || cmd.includes('dinner') || cmd.includes('کڑاہی') || cmd.includes('karahi') || cmd.includes('گوشت') || cmd.includes('chicken') || cmd.includes('مرغی')) {
+    detectedCategory = 'Dinner';
+    detectedDesc = 'Dinner (رات کا کھانا)';
+  } else if (cmd.includes('دودھ') || cmd.includes('milk') || cmd.includes('پھل') || cmd.includes('fruit') || cmd.includes('سودا') || cmd.includes('grocery')) {
+    detectedCategory = 'Other';
+    detectedDesc = 'Grocery / Items';
+  } else {
+    detectedDesc = 'Daily Mess Expense';
+  }
+
+  // If specific item word exists, use it in description
+  if (cmd.includes('روٹی') || cmd.includes('roti')) detectedDesc = 'Khameri Roti / Naan';
+  if (cmd.includes('چائے') || cmd.includes('chai')) detectedDesc = 'Chai / Tea';
+  if (cmd.includes('انڈے') || cmd.includes('eggs')) detectedDesc = 'Eggs / Omelette';
+  if (cmd.includes('بریانی') || cmd.includes('biryani')) detectedDesc = 'Biryani';
+  if (cmd.includes('کڑاہی') || cmd.includes('karahi')) detectedDesc = 'Chicken Karahi';
+  if (cmd.includes('دودھ') || cmd.includes('milk')) detectedDesc = 'Milk / Doodh';
+
+  // If the command asks to open expense form or contains data
+  if (cmd.includes('expense') || cmd.includes('خرچہ') || cmd.includes('کھولو') || cmd.includes('add') || amt || matchedPerson) {
+    openExpenseModal();
+
+    if (amt) {
+      const amtInput = document.getElementById('expense-input-amount');
+      if (amtInput) {
+        amtInput.value = amt;
+        amtInput.dispatchEvent(new Event('input'));
+      }
+    }
+
+    if (detectedDesc) {
+      const descInput = document.getElementById('expense-input-desc');
+      if (descInput) descInput.value = detectedDesc;
+    }
+
+    if (detectedCategory) {
+      setCategory(detectedCategory);
+    }
+
+    if (matchedPerson) {
+      const payerSel = document.getElementById('expense-input-paid-by');
+      if (payerSel) payerSel.value = matchedPerson.id;
+    }
+
+    let summaryText = '➕ Expense Form opened';
+    if (amt) summaryText += ` (Rs. ${amt})`;
+    if (matchedPerson) summaryText += ` for ${matchedPerson.name}`;
+    if (detectedCategory) summaryText += ` [${detectedCategory}]`;
+
+    showAIFeedback(summaryText + ' ✨');
+    setTimeout(() => closeAIAssistant(), 1200);
+    return;
+  }
+
+  // Fallback: Show understanding message
+  showAIFeedback(`🤖 Command: "${originalText}" (کمانڈ واضح نہیں، دوبارہ بولیں)`, false);
+}
+

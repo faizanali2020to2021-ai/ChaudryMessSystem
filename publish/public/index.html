@@ -82,6 +82,11 @@
           <span>Reports (6)</span>
         </div>
         
+        <div class="nav-item" onclick="toggleAIAssistant()" style="color: #6366f1; font-weight: 600;">
+          <span class="nav-icon">✨</span>
+          <span>AI Voice Assistant</span>
+        </div>
+
         <div class="nav-divider"></div>
         
         <div class="nav-item" id="nav-settings" onclick="switchView('settings')">
@@ -126,6 +131,7 @@
         </div>
         <div class="top-bar-right">
           <span id="user-role-badge" class="badge badge-green" style="font-size: 13px; font-weight: 700; padding: 6px 12px;">👑 Admin</span>
+          <button class="btn btn-sm" onclick="toggleAIAssistant()" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; border: none; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; box-shadow: 0 2px 6px rgba(99,102,241,0.35);">✨ AI Voice</button>
           <button class="btn btn-secondary btn-sm" onclick="toggleTheme()">🌓 Theme</button>
           <button class="btn btn-success btn-sm" style="background-color: #10B981; border-color: #10B981; color: white;" onclick="openPaymentModal()">💳 Receive Payment</button>
           <button class="btn btn-primary btn-sm" onclick="openExpenseModal()">+ Add Expense</button>
@@ -616,6 +622,86 @@
       <div class="dialog-actions">
         <button type="button" class="btn btn-secondary" onclick="closeLogoutModal()">Cancel</button>
         <button type="button" class="btn btn-danger" onclick="confirmLogout()">Yes, Log Out</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FLOATING AI VOICE ASSISTANT FAB BUTTON -->
+  <button id="ai-voice-fab" class="ai-fab-btn" onclick="toggleAIAssistant()" title="Open AI Voice Assistant">
+    <div class="ai-fab-pulse"></div>
+    <span class="ai-fab-icon">✨</span>
+    <span class="ai-fab-label">AI Voice</span>
+  </button>
+
+  <!-- AI VOICE ASSISTANT MODAL / CARD -->
+  <div id="ai-assistant-modal" class="modal-overlay" style="display: none;" onclick="handleAIOverlayClick(event)">
+    <div class="ai-assistant-card" id="ai-card-content">
+      
+      <!-- AI Modal Header -->
+      <div class="ai-header">
+        <div class="ai-header-left">
+          <div class="ai-header-icon-circle">✨</div>
+          <div>
+            <h3 class="ai-header-title">AI Voice Assistant</h3>
+            <span class="ai-sub-badge">⚡ Zero-Install • Smart Mess AI</span>
+          </div>
+        </div>
+        <div class="ai-header-right">
+          <button type="button" class="ai-lang-btn" id="ai-lang-btn" onclick="toggleAILanguage()" title="Switch Language">
+            🇵🇰 Urdu / EN
+          </button>
+          <button type="button" class="modal-close" onclick="closeAIAssistant()">&times;</button>
+        </div>
+      </div>
+
+      <div class="ai-body">
+        <!-- Visualizer Wave Animation when listening -->
+        <div class="ai-visualizer-container" id="ai-visualizer">
+          <div class="ai-wave-bar"></div>
+          <div class="ai-wave-bar"></div>
+          <div class="ai-wave-bar"></div>
+          <div class="ai-wave-bar"></div>
+          <div class="ai-wave-bar"></div>
+          <div class="ai-wave-bar"></div>
+          <div class="ai-wave-bar"></div>
+        </div>
+
+        <!-- Live Status & Transcript Display -->
+        <div class="ai-transcript-box" id="ai-transcript-box">
+          <div class="ai-status-indicator" id="ai-status-text">مائیک بٹن دبائیں یا بولیں: "نیا خرچہ کھولو" / "Open Expense"</div>
+          <div class="ai-live-text" id="ai-live-text">"بولنے کا انتظار ہے..."</div>
+        </div>
+
+        <!-- Action Feedback Banner -->
+        <div class="ai-feedback-banner" id="ai-feedback-banner" style="display: none;"></div>
+
+        <!-- Big Mic / Listen Button -->
+        <div class="ai-mic-section">
+          <button type="button" class="ai-big-mic-btn" id="ai-big-mic-btn" onclick="toggleVoiceListening()">
+            <span id="ai-mic-icon" style="font-size: 32px;">🎙️</span>
+          </button>
+          <div class="ai-mic-hint" id="ai-mic-hint">مائیک پر کلک کر کے بولنا شروع کریں</div>
+        </div>
+
+        <!-- Text command fallback input -->
+        <form class="ai-manual-input-form" onsubmit="handleManualAICommand(event)">
+          <input type="text" id="ai-manual-command-input" class="form-control" placeholder="یا یہاں لکھ کر Enter دبائیں (مثلاً: 500 Ali Breakfast)...">
+          <button type="submit" class="btn btn-primary" style="white-space: nowrap; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none;">Send ⚡</button>
+        </form>
+
+        <!-- Command Quick Suggestions Chips -->
+        <div class="ai-suggestions-header">
+          <span>💡 فوری وائس کمانڈز (بولیں یا کلک کریں):</span>
+        </div>
+        <div class="ai-suggestions-grid">
+          <button type="button" class="ai-chip" onclick="executeAICommand('نیا خرچہ فارم اوپن کرو')">➕ نیا خرچہ فارم کھولو</button>
+          <button type="button" class="ai-chip" onclick="executeAICommand('پیمنٹ وصولی فارم اوپن کرو')">💳 پیمنٹ وصولی فارم</button>
+          <button type="button" class="ai-chip" onclick="executeAICommand('رپورٹس اوپن کرو')">📊 تمام رپورٹس دکھاؤ</button>
+          <button type="button" class="ai-chip" onclick="executeAICommand('رپورٹ پرنٹ کرو')">🖨️ رپورٹ پرنٹ کرو</button>
+          <button type="button" class="ai-chip" onclick="executeAICommand('علی نے 500 روپے کا ناشتہ کروایا')">🍳 علی نے 500 کا ناشتہ کروایا</button>
+          <button type="button" class="ai-chip" onclick="executeAICommand('ڈیش بورڈ دکھاؤ')">🏠 ڈیش بورڈ</button>
+        </div>
+
       </div>
     </div>
   </div>
