@@ -7,7 +7,8 @@ import 'package:intl/intl.dart';
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
-const String kDefaultServerUrl = 'http://10.0.0.191:3000';
+const String kDefaultServerUrl = 'https://chaudrymess.vercel.app';
+
 
 void main() {
   runApp(const ChaudryMessApp());
@@ -229,7 +230,7 @@ class _LoginPageState extends State<LoginPage> {
         content: TextField(
           controller: ctrl,
           decoration: const InputDecoration(
-            hintText: 'http://10.0.0.191:3000',
+            hintText: 'https://chaudrymess.vercel.app',
             border: OutlineInputBorder(),
           ),
         ),
