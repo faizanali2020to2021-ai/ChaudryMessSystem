@@ -1939,7 +1939,10 @@ async function saveNewPassword(e) {
 // =============================================================================
 let aiRecognition = null;
 let isAILocalListening = false;
-let aiCurrentLanguage = 'ur-PK'; // Default Urdu (supports English seamlessly)
+let shouldBeListening = false;
+let speechSilenceTimer = null;
+let lastRecognizedText = '';
+let aiCurrentLanguage = 'ur-PK'; // 'ur-PK' or 'en-US'
 
 function initAISpeechEngine() {
   const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1948,8 +1951,9 @@ function initAISpeechEngine() {
     return null;
   }
   const rec = new SpeechRec();
-  rec.continuous = false;
+  rec.continuous = true;
   rec.interimResults = true;
+  rec.maxAlternatives = 1;
   rec.lang = aiCurrentLanguage;
 
   rec.onstart = () => {
@@ -1961,38 +1965,86 @@ function initAISpeechEngine() {
     let interim = '';
     let final = '';
     for (let i = event.resultIndex; i < event.results.length; ++i) {
+      const trans = event.results[i][0].transcript;
       if (event.results[i].isFinal) {
-        final += event.results[i][0].transcript;
+        final += trans;
       } else {
-        interim += event.results[i][0].transcript;
+        interim += trans;
       }
     }
-    const liveTextEl = document.getElementById('ai-live-text');
-    if (liveTextEl) {
-      liveTextEl.textContent = `"${final || interim || '...'}"`;
-    }
-    if (final && final.trim()) {
-      executeAICommand(final.trim());
+    const current = (final || interim || '').trim();
+    if (current) {
+      lastRecognizedText = current;
+      const liveTextEl = document.getElementById('ai-live-text');
+      if (liveTextEl) {
+        liveTextEl.textContent = `"${current}"`;
+      }
+      const statusEl = document.getElementById('ai-status-text');
+      if (statusEl) statusEl.textContent = '⚡ سن رہا ہوں... (Listening)';
+
+      // Auto-trigger command after 1.2s of silence after speech
+      clearTimeout(speechSilenceTimer);
+      speechSilenceTimer = setTimeout(() => {
+        if (lastRecognizedText && shouldBeListening) {
+          executeAICommand(lastRecognizedText);
+          lastRecognizedText = '';
+        }
+      }, 1300);
     }
   };
 
   rec.onerror = (event) => {
     console.warn('AI Speech recognition error:', event.error);
-    isAILocalListening = false;
-    updateAIModalState();
     const statusEl = document.getElementById('ai-status-text');
-    if (statusEl) {
-      if (event.error === 'not-allowed') {
-        statusEl.textContent = '❌ مائیکروفون کی اجازت نہیں ملی۔ براؤزر سیٹنگ سے مائیک آن کریں۔';
-      } else if (event.error === 'no-speech') {
-        statusEl.textContent = 'کوئی آواز نہیں سنی گئی۔ دوبارہ کوشش کریں۔';
-      } else {
-        statusEl.textContent = `کوشش دوبارہ کریں (${event.error})`;
+
+    if (event.error === 'network') {
+      // If network error occurred on ur-PK (often Google speech server connection restriction), auto-switch to en-US
+      if (aiCurrentLanguage === 'ur-PK') {
+        console.log('Network error on ur-PK, auto-switching to en-US fallback...');
+        aiCurrentLanguage = 'en-US';
+        const btn = document.getElementById('ai-lang-btn');
+        if (btn) btn.textContent = '🇬🇧 English / Roman Urdu';
+        if (statusEl) statusEl.textContent = '🔄 وائس سرور سوئچ ہو گیا (English/Roman Urdu)';
+        try { rec.stop(); } catch (_) {}
+        setTimeout(() => {
+          if (shouldBeListening) {
+            aiRecognition = null;
+            startVoiceListening();
+          }
+        }, 400);
+        return;
       }
+    }
+
+    if (event.error === 'not-allowed') {
+      shouldBeListening = false;
+      isAILocalListening = false;
+      updateAIModalState();
+      if (statusEl) statusEl.textContent = '❌ مائیکروفون کی اجازت نہیں ملی۔ براؤزر سیٹنگ سے مائیک Allow کریں۔';
+      return;
+    }
+
+    if (event.error === 'no-speech') {
+      // Normal silence pause, keep listening smoothly
+      return;
+    }
+
+    if (statusEl) {
+      statusEl.textContent = `مائیک آن ہے، بولتے رہیں... (${event.error})`;
     }
   };
 
   rec.onend = () => {
+    // If modal is open and user wants to continue listening, seamlessly restart
+    const modal = document.getElementById('ai-assistant-modal');
+    if (shouldBeListening && modal && modal.style.display === 'flex') {
+      try {
+        rec.start();
+        return;
+      } catch (e) {
+        // Handled below
+      }
+    }
     isAILocalListening = false;
     updateAIModalState();
   };
@@ -2018,11 +2070,11 @@ function openAIAssistant() {
   const feedback = document.getElementById('ai-feedback-banner');
   if (feedback) feedback.style.display = 'none';
   const statusEl = document.getElementById('ai-status-text');
-  if (statusEl) statusEl.textContent = 'مائیک بٹن دبائیں یا بولیں: "نیا خرچہ کھولو" / "Open Expense"';
+  if (statusEl) statusEl.textContent = 'مائیک آن ہے، روانی سے بولیں... (Listening)';
   const liveEl = document.getElementById('ai-live-text');
   if (liveEl) liveEl.textContent = '"بولنے کا انتظار ہے..."';
   
-  // Auto start listening on open
+  // Start continuous listening on open
   setTimeout(() => startVoiceListening(), 150);
 }
 
@@ -2042,10 +2094,11 @@ function toggleAILanguage() {
   aiCurrentLanguage = (aiCurrentLanguage === 'ur-PK') ? 'en-US' : 'ur-PK';
   const btn = document.getElementById('ai-lang-btn');
   if (btn) {
-    btn.textContent = (aiCurrentLanguage === 'ur-PK') ? '🇵🇰 Urdu / EN' : '🇬🇧 English / Urdu';
+    btn.textContent = (aiCurrentLanguage === 'ur-PK') ? '🇵🇰 Urdu / EN' : '🇬🇧 English / Roman Urdu';
   }
-  if (isAILocalListening) {
+  if (shouldBeListening) {
     stopVoiceListening();
+    aiRecognition = null;
     setTimeout(() => startVoiceListening(), 250);
   }
 }
@@ -2059,6 +2112,9 @@ function toggleVoiceListening() {
 }
 
 function startVoiceListening() {
+  shouldBeListening = true;
+  lastRecognizedText = '';
+  clearTimeout(speechSilenceTimer);
   try {
     if (!aiRecognition) {
       aiRecognition = initAISpeechEngine();
@@ -2071,12 +2127,14 @@ function startVoiceListening() {
       if (statusEl) statusEl.textContent = 'براؤزر وائس سپورٹ نہیں کرتا۔ نیچے ٹیکسٹ ٹائپ کریں۔';
     }
   } catch (err) {
-    console.warn('Voice start error:', err);
+    console.warn('Voice start notice:', err);
   }
 }
 
 function stopVoiceListening() {
-  if (aiRecognition && isAILocalListening) {
+  shouldBeListening = false;
+  clearTimeout(speechSilenceTimer);
+  if (aiRecognition) {
     try { aiRecognition.stop(); } catch (_) {}
   }
   isAILocalListening = false;
