@@ -624,12 +624,32 @@ class _ExpensesPageState extends State<ExpensesPage> {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => ExpenseFormPage(api: widget.api)));
-          if (result == true) _load();
-        },
-        child: const Icon(Icons.add),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton.extended(
+            heroTag: 'fab_payment',
+            backgroundColor: const Color(0xFF10B981),
+            foregroundColor: Colors.white,
+            icon: const Icon(Icons.payments),
+            label: const Text('Receive Payment', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () async {
+              final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => PaymentFormPage(api: widget.api)));
+              if (result == true) _load();
+            },
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton.extended(
+            heroTag: 'fab_expense',
+            icon: const Icon(Icons.add),
+            label: const Text('Add Expense'),
+            onPressed: () async {
+              final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => ExpenseFormPage(api: widget.api)));
+              if (result == true) _load();
+            },
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -642,6 +662,7 @@ class _ExpensesPageState extends State<ExpensesPage> {
                       itemCount: _filtered.length,
                       itemBuilder: (_, i) {
                         final e = _filtered[i];
+                        final isPayment = e['category'] == 'Payment';
                         return Card(
                           margin: const EdgeInsets.only(bottom: 8),
                           child: ListTile(
@@ -654,7 +675,13 @@ class _ExpensesPageState extends State<ExpensesPage> {
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(formatCurrency(e['amount']), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo)),
+                                Text(
+                                  formatCurrency(e['amount']),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: isPayment ? const Color(0xFF10B981) : Colors.indigo,
+                                  ),
+                                ),
                                 const SizedBox(width: 4),
                                 PopupMenuButton(
                                   itemBuilder: (_) => [
@@ -682,6 +709,7 @@ class _ExpensesPageState extends State<ExpensesPage> {
 
   Color _categoryColor(String? cat) {
     switch (cat) {
+      case 'Payment': return const Color(0xFF10B981);
       case 'Breakfast': return Colors.orange;
       case 'Lunch': return Colors.green;
       case 'Dinner': return Colors.indigo;
@@ -691,6 +719,7 @@ class _ExpensesPageState extends State<ExpensesPage> {
 
   IconData _categoryIcon(String? cat) {
     switch (cat) {
+      case 'Payment': return Icons.payments;
       case 'Breakfast': return Icons.wb_sunny;
       case 'Lunch': return Icons.restaurant;
       case 'Dinner': return Icons.nightlight;
@@ -698,6 +727,7 @@ class _ExpensesPageState extends State<ExpensesPage> {
     }
   }
 }
+
 
 // ---------------------------------------------------------------------------
 // Expense Form Page (Add / Edit)
@@ -1154,6 +1184,213 @@ Widget _SummaryRow(String label, double entered, double total) {
       ],
     ),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Payment Form Page (Receive / Record Payment)
+// ---------------------------------------------------------------------------
+class PaymentFormPage extends StatefulWidget {
+  final ApiService api;
+  const PaymentFormPage({super.key, required this.api});
+  @override
+  State<PaymentFormPage> createState() => _PaymentFormPageState();
+}
+
+class _PaymentFormPageState extends State<PaymentFormPage> {
+  final _formKey = GlobalKey<FormState>();
+  final _descCtrl = TextEditingController();
+  final _amtCtrl = TextEditingController();
+  DateTime _date = DateTime.now();
+  bool _loading = false;
+  bool _loadingInit = false;
+  List<dynamic> _persons = [];
+  int? _payerId;
+  int? _receiverId;
+
+  @override
+  void initState() {
+    super.initState();
+    _initData();
+  }
+
+  @override
+  void dispose() {
+    _descCtrl.dispose();
+    _amtCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initData() async {
+    setState(() => _loadingInit = true);
+    try {
+      final data = await widget.api.get('/persons');
+      _persons = data['persons'] ?? [];
+      if (_persons.isNotEmpty) {
+        _payerId = _persons[0]['id'] as int;
+        if (_persons.length > 1) {
+          _receiverId = _persons[1]['id'] as int;
+        } else {
+          _receiverId = _persons[0]['id'] as int;
+        }
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+    if (mounted) setState(() => _loadingInit = false);
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_payerId == null || _receiverId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select both Payer and Receiver')));
+      return;
+    }
+    if (_payerId == _receiverId) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Paid By and Received By cannot be the same member!')));
+      return;
+    }
+
+    setState(() => _loading = true);
+    try {
+      final dateMillis = DateTime(_date.year, _date.month, _date.day, 12, 0, 0).millisecondsSinceEpoch;
+      final body = {
+        'dateMillis': dateMillis,
+        'paidByPersonId': _payerId,
+        'receivedByPersonId': _receiverId,
+        'amount': double.parse(_amtCtrl.text),
+        'description': _descCtrl.text.trim(),
+      };
+
+      final result = await widget.api.post('/payments', body);
+      if (result['success'] == true) {
+        if (mounted) Navigator.pop(context, true);
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message'] ?? 'Error')));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Receive Payment'),
+        actions: [
+          if (_loading)
+            const Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+          else
+            TextButton(onPressed: _save, child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF10B981)))),
+        ],
+      ),
+      body: _loadingInit
+          ? const Center(child: CircularProgressIndicator())
+          : Form(
+              key: _formKey,
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.calendar_today),
+                      title: const Text('Date'),
+                      subtitle: Text(DateFormat('dd MMMM yyyy').format(_date)),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () async {
+                        final d = await showDatePicker(
+                          context: context,
+                          initialDate: _date,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime.now().add(const Duration(days: 1)),
+                        );
+                        if (d != null) setState(() => _date = d);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Paid By
+                  const Text('Paid By (کس نے دیا / ادا کیا - Credit)', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<int>(
+                    value: _payerId,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.person, color: Color(0xFF10B981)),
+                      helperText: 'اس ممبر کی Paid رقم بڑھ جائے گی',
+                      helperStyle: TextStyle(color: Color(0xFF10B981)),
+                    ),
+                    items: _persons.map((p) => DropdownMenuItem<int>(value: p['id'] as int, child: Text(p['name'] as String))).toList(),
+                    onChanged: (v) => setState(() => _payerId = v),
+                    validator: (v) => v == null ? 'Select who paid' : null,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Received By
+                  const Text('Received By (کس کو ملا / وصول کیا - Debit)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<int>(
+                    value: _receiverId,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.person_outline, color: Colors.red),
+                      helperText: 'اس ممبر کا خرچہ / حصہ بڑھ جائے گا',
+                      helperStyle: TextStyle(color: Colors.red),
+                    ),
+                    items: _persons.map((p) => DropdownMenuItem<int>(value: p['id'] as int, child: Text(p['name'] as String))).toList(),
+                    onChanged: (v) => setState(() => _receiverId = v),
+                    validator: (v) => v == null ? 'Select who received' : null,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Amount
+                  TextFormField(
+                    controller: _amtCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
+                    decoration: const InputDecoration(
+                      labelText: 'Payment Amount (Rs.) *',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.payments, color: Color(0xFF10B981)),
+                    ),
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'Required';
+                      if ((double.tryParse(v) ?? 0) <= 0) return 'Enter a valid amount';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Description
+                  TextFormField(
+                    controller: _descCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Description / Notes (Optional)',
+                      hintText: 'e.g. Cash settlement, Mess payment, etc.',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.notes),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  ElevatedButton.icon(
+                    onPressed: _loading ? null : _save,
+                    icon: const Icon(Icons.check_circle),
+                    label: const Text('Save Payment Record', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

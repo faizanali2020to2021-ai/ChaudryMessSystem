@@ -416,26 +416,46 @@ function populatePersonSelects() {
   const expenseFilter = document.getElementById('expense-filter-person');
   const paidBy = document.getElementById('expense-input-paid-by');
   const reportPerson = document.getElementById('report-person-select');
+  const paymentPaidBy = document.getElementById('payment-input-paid-by');
+  const paymentReceivedBy = document.getElementById('payment-input-received-by');
 
   // Preserve selections if possible
   const currentPaid = paidBy ? paidBy.value : '';
   const currentReport = reportPerson ? reportPerson.value : '';
+  const currentPayPaid = paymentPaidBy ? paymentPaidBy.value : '';
+  const currentPayRecv = paymentReceivedBy ? paymentReceivedBy.value : '';
+
+  const optionsHtml = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
 
   if (expenseFilter) {
-    expenseFilter.innerHTML = `<option value="">All Persons</option>` +
-      state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    expenseFilter.innerHTML = `<option value="">All Persons</option>` + optionsHtml;
   }
 
   if (paidBy) {
-    paidBy.innerHTML = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    paidBy.innerHTML = optionsHtml;
     if (currentPaid) paidBy.value = currentPaid;
   }
 
   if (reportPerson) {
-    reportPerson.innerHTML = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    reportPerson.innerHTML = optionsHtml;
     if (currentReport) reportPerson.value = currentReport;
   }
+
+  if (paymentPaidBy) {
+    paymentPaidBy.innerHTML = optionsHtml;
+    if (currentPayPaid) paymentPaidBy.value = currentPayPaid;
+  }
+
+  if (paymentReceivedBy) {
+    paymentReceivedBy.innerHTML = optionsHtml;
+    if (currentPayRecv) {
+      paymentReceivedBy.value = currentPayRecv;
+    } else if (state.persons.length > 1) {
+      paymentReceivedBy.value = state.persons[1].id;
+    }
+  }
 }
+
 
 async function loadPersonsTable() {
   await loadPersons();
@@ -681,14 +701,17 @@ async function loadExpenses() {
     const isAdmin = state.user && state.user.role === 'admin';
     state.expenses.forEach(e => {
       const tr = document.createElement('tr');
-      const catBadge = e.category ? `<span class="badge badge-primary">${e.category}</span>` : '<span style="color: var(--text-muted); font-size: 12px;">—</span>';
+      const isPayment = e.category === 'Payment';
+      const catBadge = isPayment
+        ? `<span class="badge" style="background-color: #d1fae5; color: #065f46; font-weight: 600;">💳 Payment</span>`
+        : (e.category ? `<span class="badge badge-primary">${e.category}</span>` : '<span style="color: var(--text-muted); font-size: 12px;">—</span>');
       
       tr.innerHTML = `
         <td>${formatDate(Number(e.date))}</td>
         <td><strong>${e.description}</strong></td>
         <td>${catBadge}</td>
         <td>${e.paidByName}</td>
-        <td style="text-align: right; font-weight: 700;">${formatCurrency(e.amount)}</td>
+        <td style="text-align: right; font-weight: 700; ${isPayment ? 'color: #10B981;' : ''}">${formatCurrency(e.amount)}</td>
         <td style="text-align: center;">
           <button class="btn btn-secondary btn-sm" onclick="openExpenseModal(${e.id})">Edit</button>
           ${isAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">Delete</button>` : ''}
@@ -698,6 +721,91 @@ async function loadExpenses() {
     });
   } catch (err) {
     console.error('Failed to load expenses:', err);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Payment Modal & Actions (Member to Member Settlement)
+// -----------------------------------------------------------------------------
+function openPaymentModal() {
+  const modal = document.getElementById('payment-modal');
+  const dateInput = document.getElementById('payment-input-date');
+  const amountInput = document.getElementById('payment-input-amount');
+  const descInput = document.getElementById('payment-input-desc');
+
+  populatePersonSelects();
+
+  dateInput.value = toInputDate(new Date());
+  amountInput.value = '';
+  descInput.value = '';
+
+  modal.style.display = 'flex';
+}
+
+function closePaymentModal() {
+  const modal = document.getElementById('payment-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function savePayment(e) {
+  e.preventDefault();
+  const dateStr = document.getElementById('payment-input-date').value;
+  const paidByPersonId = parseInt(document.getElementById('payment-input-paid-by').value, 10);
+  const receivedByPersonId = parseInt(document.getElementById('payment-input-received-by').value, 10);
+  const amount = parseFloat(document.getElementById('payment-input-amount').value);
+  const description = document.getElementById('payment-input-desc').value.trim();
+
+  if (!paidByPersonId) {
+    alert('Please select who paid (Paid By).');
+    return;
+  }
+  if (!receivedByPersonId) {
+    alert('Please select who received (Received By).');
+    return;
+  }
+  if (paidByPersonId === receivedByPersonId) {
+    alert('Paid By and Received By cannot be the same person! Please select different members.');
+    return;
+  }
+  if (isNaN(amount) || amount <= 0) {
+    alert('Please enter a valid payment amount.');
+    return;
+  }
+
+  const dateObj = new Date(dateStr + 'T12:00:00');
+  const dateMillis = dateObj.getTime();
+
+  const payload = {
+    dateMillis,
+    paidByPersonId,
+    receivedByPersonId,
+    amount,
+    description
+  };
+
+  const btn = document.getElementById('payment-submit-btn');
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      closePaymentModal();
+      if (state.activeView === 'expenses') loadExpenses();
+      if (state.activeView === 'dashboard') loadDashboard();
+      if (state.activeView === 'reports') generateActiveReport();
+    } else {
+      alert('Error: ' + data.message);
+    }
+  } catch (err) {
+    alert('Failed to record payment: ' + err.message);
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 

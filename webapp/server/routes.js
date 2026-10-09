@@ -641,6 +641,86 @@ router.post('/expenses', async (req, res) => {
   }
 });
 
+// POST /api/payments (Direct Member to Member Payment / Settlement Transfer)
+router.post('/payments', async (req, res) => {
+  const pool = await getPool();
+  const transaction = new sql.Transaction(pool);
+
+  try {
+    const { dateMillis, description, amount, paidByPersonId, receivedByPersonId } = req.body;
+
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      return res.status(400).json({ success: false, message: 'Enter a valid payment amount' });
+    }
+    const payerId = parseInt(paidByPersonId, 10);
+    const receiverId = parseInt(receivedByPersonId, 10);
+
+    if (!payerId || isNaN(payerId)) {
+      return res.status(400).json({ success: false, message: 'Select who paid (Paid By)' });
+    }
+    if (!receiverId || isNaN(receiverId)) {
+      return res.status(400).json({ success: false, message: 'Select who received (Received By)' });
+    }
+    if (payerId === receiverId) {
+      return res.status(400).json({ success: false, message: 'Payer and Receiver cannot be the same person' });
+    }
+
+    // Get names for default description
+    const pNamesRes = await pool.request()
+      .input('payerId', sql.BigInt, payerId)
+      .input('receiverId', sql.BigInt, receiverId)
+      .query('SELECT id, name FROM dbo.Persons WHERE id IN (@payerId, @receiverId)');
+    
+    let payerName = 'Member';
+    let receiverName = 'Member';
+    for (const r of pNamesRes.recordset) {
+      if (r.id == payerId) payerName = r.name;
+      if (r.id == receiverId) receiverName = r.name;
+    }
+
+    const desc = (description && description.trim()) ? description.trim() : `Payment from ${payerName} to ${receiverName}`;
+    const dateVal = dateMillis ? parseInt(dateMillis, 10) : Date.now();
+
+    await transaction.begin();
+
+    // 1. Insert payment record in Expenses table with category = 'Payment'
+    const insertExpReq = new sql.Request(transaction);
+    insertExpReq.input('expenseDate', sql.BigInt, dateVal);
+    insertExpReq.input('description', sql.NVarChar(500), desc);
+    insertExpReq.input('amount', sql.Decimal(18, 2), numAmount);
+    insertExpReq.input('paidByPersonId', sql.BigInt, payerId);
+    insertExpReq.input('category', sql.NVarChar(50), 'Payment');
+
+    const expResult = await insertExpReq.query(`
+      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category)
+      OUTPUT INSERTED.id
+      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category)
+    `);
+    const expenseId = expResult.recordset[0].id;
+
+    // 2. Insert into ExpensePayers (Payer gets credit -> increases totalPaid)
+    const pReq = new sql.Request(transaction);
+    pReq.input('expenseId', sql.BigInt, expenseId);
+    pReq.input('personId', sql.BigInt, payerId);
+    pReq.input('amountPaid', sql.Decimal(18, 2), numAmount);
+    await pReq.query(`INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid) VALUES (@expenseId, @personId, @amountPaid)`);
+
+    // 3. Insert into ExpenseShares (Receiver gets debit -> increases totalShare / expense)
+    const shareReq = new sql.Request(transaction);
+    shareReq.input('expenseId', sql.BigInt, expenseId);
+    shareReq.input('personId', sql.BigInt, receiverId);
+    shareReq.input('shareAmount', sql.Decimal(18, 2), numAmount);
+    await shareReq.query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount) VALUES (@expenseId, @personId, @shareAmount)`);
+
+    await transaction.commit();
+    res.json({ success: true, expenseId, message: 'Payment recorded successfully' });
+  } catch (err) {
+    if (transaction._acquiredConnection) await transaction.rollback();
+    console.error('Error recording payment:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // PUT /api/expenses/:id
 router.put('/expenses/:id', async (req, res) => {
