@@ -61,7 +61,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   initSidebar();
   setupDefaultDates();
   await loadPublicSystemInfo();
-  showLoginModal();
+
+  // Session & Page Restore Logic on Refresh
+  const savedUser = localStorage.getItem('chaudry_mess_user');
+  if (savedUser) {
+    try {
+      state.user = JSON.parse(savedUser);
+      applyUserIdentity();
+      hideLoginModal();
+      await loadPersons();
+
+      // Restore active page/tab from URL hash or localStorage
+      const hashView = window.location.hash ? window.location.hash.replace('#', '') : '';
+      const savedView = hashView || localStorage.getItem('chaudry_mess_active_view') || 'dashboard';
+      switchView(savedView);
+    } catch (err) {
+      console.warn('Session restore notice:', err);
+      showLoginModal();
+    }
+  } else {
+    showLoginModal();
+  }
 });
 
 async function loadPublicSystemInfo() {
@@ -195,10 +215,13 @@ async function handleLogin(e) {
 
     if (data.success) {
       state.user = data.user;
+      localStorage.setItem('chaudry_mess_user', JSON.stringify(data.user));
       applyUserIdentity();
       hideLoginModal();
       await loadPersons();
-      await loadDashboard();
+      const hashView = window.location.hash ? window.location.hash.replace('#', '') : '';
+      const savedView = hashView || localStorage.getItem('chaudry_mess_active_view') || 'dashboard';
+      switchView(savedView);
     } else {
       errorEl.textContent = data.message || 'Invalid password';
       errorEl.style.display = 'block';
@@ -235,12 +258,18 @@ function handleLogoutOverlayClick(e) {
 function confirmLogout() {
   closeLogoutModal();
   state.user = null;
+  localStorage.removeItem('chaudry_mess_user');
+  localStorage.removeItem('chaudry_mess_active_view');
+  try {
+    history.replaceState(null, '', window.location.pathname);
+  } catch (_) {}
   const pwInput = document.getElementById('login-password');
   if (pwInput) pwInput.value = '';
   const errEl = document.getElementById('login-error');
   if (errEl) errEl.style.display = 'none';
   showLoginModal();
 }
+
 
 function applyUserIdentity() {
   if (!state.user) return;
@@ -300,6 +329,12 @@ function applyUserIdentity() {
 // -----------------------------------------------------------------------------
 function switchView(viewName) {
   state.activeView = viewName;
+  localStorage.setItem('chaudry_mess_active_view', viewName);
+  try {
+    if (window.location.hash !== `#${viewName}`) {
+      history.replaceState(null, '', `#${viewName}`);
+    }
+  } catch (_) {}
 
   // Update navigation highlights
   const navItems = document.querySelectorAll('.sidebar-nav .nav-item');
@@ -333,6 +368,7 @@ function switchView(viewName) {
   if (viewName === 'reports') generateActiveReport();
   if (viewName === 'settings') loadDatabaseStatus();
 }
+
 
 // -----------------------------------------------------------------------------
 // Dashboard
@@ -515,11 +551,24 @@ function closePersonModal() {
   document.getElementById('person-modal').style.display = 'none';
 }
 
+let isSavingPerson = false;
 async function savePerson(e) {
   e.preventDefault();
+  if (isSavingPerson) return;
+
   const id = document.getElementById('person-edit-id').value;
   const name = document.getElementById('person-input-name').value.trim();
   const mobileNumber = document.getElementById('person-input-mobile').value.trim();
+
+  const form = document.getElementById('person-form');
+  const btn = form ? form.querySelector('button[type="submit"]') : null;
+  const origText = btn ? btn.textContent : 'Save Member';
+
+  isSavingPerson = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
 
   try {
     const url = id ? `/api/persons/${id}` : '/api/persons';
@@ -542,6 +591,12 @@ async function savePerson(e) {
     }
   } catch (err) {
     alert('Failed to save person: ' + err.message);
+  } finally {
+    isSavingPerson = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   }
 }
 
@@ -747,8 +802,11 @@ function closePaymentModal() {
   if (modal) modal.style.display = 'none';
 }
 
+let isSavingPayment = false;
 async function savePayment(e) {
   e.preventDefault();
+  if (isSavingPayment) return;
+
   const dateStr = document.getElementById('payment-input-date').value;
   const paidByPersonId = parseInt(document.getElementById('payment-input-paid-by').value, 10);
   const receivedByPersonId = parseInt(document.getElementById('payment-input-received-by').value, 10);
@@ -784,7 +842,12 @@ async function savePayment(e) {
   };
 
   const btn = document.getElementById('payment-submit-btn');
-  if (btn) btn.disabled = true;
+  const origText = btn ? btn.textContent : 'Save Payment';
+  isSavingPayment = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
 
   try {
     const res = await fetch('/api/payments', {
@@ -805,7 +868,11 @@ async function savePayment(e) {
   } catch (err) {
     alert('Failed to record payment: ' + err.message);
   } finally {
-    if (btn) btn.disabled = false;
+    isSavingPayment = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   }
 }
 
@@ -1087,8 +1154,11 @@ function updateCustomSplitSummary() {
   }
 }
 
+let isSavingExpense = false;
 async function saveExpense(e) {
   e.preventDefault();
+  if (isSavingExpense) return;
+
   const id = document.getElementById('expense-edit-id').value;
   const dateStr = document.getElementById('expense-input-date').value;
   const description = document.getElementById('expense-input-desc').value.trim();
@@ -1155,6 +1225,14 @@ async function saveExpense(e) {
 
   const payload = { dateMillis, description, amount, category, ...payerPayload, ...splitPayload };
 
+  const btn = document.getElementById('expense-submit-btn');
+  const origText = btn ? btn.textContent : 'Save Expense';
+  isSavingExpense = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
   try {
     const url = id ? `/api/expenses/${id}` : '/api/expenses';
     const method = id ? 'PUT' : 'POST';
@@ -1176,6 +1254,12 @@ async function saveExpense(e) {
     }
   } catch (err) {
     alert('Failed to save expense: ' + err.message);
+  } finally {
+    isSavingExpense = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   }
 }
 

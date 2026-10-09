@@ -61,7 +61,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   initSidebar();
   setupDefaultDates();
   await loadPublicSystemInfo();
-  showLoginModal();
+
+  // Session & Page Restore Logic on Refresh
+  const savedUser = localStorage.getItem('chaudry_mess_user');
+  if (savedUser) {
+    try {
+      state.user = JSON.parse(savedUser);
+      applyUserIdentity();
+      hideLoginModal();
+      await loadPersons();
+
+      // Restore active page/tab from URL hash or localStorage
+      const hashView = window.location.hash ? window.location.hash.replace('#', '') : '';
+      const savedView = hashView || localStorage.getItem('chaudry_mess_active_view') || 'dashboard';
+      switchView(savedView);
+    } catch (err) {
+      console.warn('Session restore notice:', err);
+      showLoginModal();
+    }
+  } else {
+    showLoginModal();
+  }
 });
 
 async function loadPublicSystemInfo() {
@@ -195,10 +215,13 @@ async function handleLogin(e) {
 
     if (data.success) {
       state.user = data.user;
+      localStorage.setItem('chaudry_mess_user', JSON.stringify(data.user));
       applyUserIdentity();
       hideLoginModal();
       await loadPersons();
-      await loadDashboard();
+      const hashView = window.location.hash ? window.location.hash.replace('#', '') : '';
+      const savedView = hashView || localStorage.getItem('chaudry_mess_active_view') || 'dashboard';
+      switchView(savedView);
     } else {
       errorEl.textContent = data.message || 'Invalid password';
       errorEl.style.display = 'block';
@@ -235,12 +258,18 @@ function handleLogoutOverlayClick(e) {
 function confirmLogout() {
   closeLogoutModal();
   state.user = null;
+  localStorage.removeItem('chaudry_mess_user');
+  localStorage.removeItem('chaudry_mess_active_view');
+  try {
+    history.replaceState(null, '', window.location.pathname);
+  } catch (_) {}
   const pwInput = document.getElementById('login-password');
   if (pwInput) pwInput.value = '';
   const errEl = document.getElementById('login-error');
   if (errEl) errEl.style.display = 'none';
   showLoginModal();
 }
+
 
 function applyUserIdentity() {
   if (!state.user) return;
@@ -300,6 +329,12 @@ function applyUserIdentity() {
 // -----------------------------------------------------------------------------
 function switchView(viewName) {
   state.activeView = viewName;
+  localStorage.setItem('chaudry_mess_active_view', viewName);
+  try {
+    if (window.location.hash !== `#${viewName}`) {
+      history.replaceState(null, '', `#${viewName}`);
+    }
+  } catch (_) {}
 
   // Update navigation highlights
   const navItems = document.querySelectorAll('.sidebar-nav .nav-item');
@@ -333,6 +368,7 @@ function switchView(viewName) {
   if (viewName === 'reports') generateActiveReport();
   if (viewName === 'settings') loadDatabaseStatus();
 }
+
 
 // -----------------------------------------------------------------------------
 // Dashboard
@@ -416,26 +452,46 @@ function populatePersonSelects() {
   const expenseFilter = document.getElementById('expense-filter-person');
   const paidBy = document.getElementById('expense-input-paid-by');
   const reportPerson = document.getElementById('report-person-select');
+  const paymentPaidBy = document.getElementById('payment-input-paid-by');
+  const paymentReceivedBy = document.getElementById('payment-input-received-by');
 
   // Preserve selections if possible
   const currentPaid = paidBy ? paidBy.value : '';
   const currentReport = reportPerson ? reportPerson.value : '';
+  const currentPayPaid = paymentPaidBy ? paymentPaidBy.value : '';
+  const currentPayRecv = paymentReceivedBy ? paymentReceivedBy.value : '';
+
+  const optionsHtml = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
 
   if (expenseFilter) {
-    expenseFilter.innerHTML = `<option value="">All Persons</option>` +
-      state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    expenseFilter.innerHTML = `<option value="">All Persons</option>` + optionsHtml;
   }
 
   if (paidBy) {
-    paidBy.innerHTML = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    paidBy.innerHTML = optionsHtml;
     if (currentPaid) paidBy.value = currentPaid;
   }
 
   if (reportPerson) {
-    reportPerson.innerHTML = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    reportPerson.innerHTML = optionsHtml;
     if (currentReport) reportPerson.value = currentReport;
   }
+
+  if (paymentPaidBy) {
+    paymentPaidBy.innerHTML = optionsHtml;
+    if (currentPayPaid) paymentPaidBy.value = currentPayPaid;
+  }
+
+  if (paymentReceivedBy) {
+    paymentReceivedBy.innerHTML = optionsHtml;
+    if (currentPayRecv) {
+      paymentReceivedBy.value = currentPayRecv;
+    } else if (state.persons.length > 1) {
+      paymentReceivedBy.value = state.persons[1].id;
+    }
+  }
 }
+
 
 async function loadPersonsTable() {
   await loadPersons();
@@ -495,11 +551,24 @@ function closePersonModal() {
   document.getElementById('person-modal').style.display = 'none';
 }
 
+let isSavingPerson = false;
 async function savePerson(e) {
   e.preventDefault();
+  if (isSavingPerson) return;
+
   const id = document.getElementById('person-edit-id').value;
   const name = document.getElementById('person-input-name').value.trim();
   const mobileNumber = document.getElementById('person-input-mobile').value.trim();
+
+  const form = document.getElementById('person-form');
+  const btn = form ? form.querySelector('button[type="submit"]') : null;
+  const origText = btn ? btn.textContent : 'Save Member';
+
+  isSavingPerson = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
 
   try {
     const url = id ? `/api/persons/${id}` : '/api/persons';
@@ -522,6 +591,12 @@ async function savePerson(e) {
     }
   } catch (err) {
     alert('Failed to save person: ' + err.message);
+  } finally {
+    isSavingPerson = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   }
 }
 
@@ -681,14 +756,17 @@ async function loadExpenses() {
     const isAdmin = state.user && state.user.role === 'admin';
     state.expenses.forEach(e => {
       const tr = document.createElement('tr');
-      const catBadge = e.category ? `<span class="badge badge-primary">${e.category}</span>` : '<span style="color: var(--text-muted); font-size: 12px;">—</span>';
+      const isPayment = e.category === 'Payment';
+      const catBadge = isPayment
+        ? `<span class="badge" style="background-color: #d1fae5; color: #065f46; font-weight: 600;">💳 Payment</span>`
+        : (e.category ? `<span class="badge badge-primary">${e.category}</span>` : '<span style="color: var(--text-muted); font-size: 12px;">—</span>');
       
       tr.innerHTML = `
         <td>${formatDate(Number(e.date))}</td>
         <td><strong>${e.description}</strong></td>
         <td>${catBadge}</td>
         <td>${e.paidByName}</td>
-        <td style="text-align: right; font-weight: 700;">${formatCurrency(e.amount)}</td>
+        <td style="text-align: right; font-weight: 700; ${isPayment ? 'color: #10B981;' : ''}">${formatCurrency(e.amount)}</td>
         <td style="text-align: center;">
           <button class="btn btn-secondary btn-sm" onclick="openExpenseModal(${e.id})">Edit</button>
           ${isAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">Delete</button>` : ''}
@@ -698,6 +776,103 @@ async function loadExpenses() {
     });
   } catch (err) {
     console.error('Failed to load expenses:', err);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Payment Modal & Actions (Member to Member Settlement)
+// -----------------------------------------------------------------------------
+function openPaymentModal() {
+  const modal = document.getElementById('payment-modal');
+  const dateInput = document.getElementById('payment-input-date');
+  const amountInput = document.getElementById('payment-input-amount');
+  const descInput = document.getElementById('payment-input-desc');
+
+  populatePersonSelects();
+
+  dateInput.value = toInputDate(new Date());
+  amountInput.value = '';
+  descInput.value = '';
+
+  modal.style.display = 'flex';
+}
+
+function closePaymentModal() {
+  const modal = document.getElementById('payment-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+let isSavingPayment = false;
+async function savePayment(e) {
+  e.preventDefault();
+  if (isSavingPayment) return;
+
+  const dateStr = document.getElementById('payment-input-date').value;
+  const paidByPersonId = parseInt(document.getElementById('payment-input-paid-by').value, 10);
+  const receivedByPersonId = parseInt(document.getElementById('payment-input-received-by').value, 10);
+  const amount = parseFloat(document.getElementById('payment-input-amount').value);
+  const description = document.getElementById('payment-input-desc').value.trim();
+
+  if (!paidByPersonId) {
+    alert('Please select who paid (Paid By).');
+    return;
+  }
+  if (!receivedByPersonId) {
+    alert('Please select who received (Received By).');
+    return;
+  }
+  if (paidByPersonId === receivedByPersonId) {
+    alert('Paid By and Received By cannot be the same person! Please select different members.');
+    return;
+  }
+  if (isNaN(amount) || amount <= 0) {
+    alert('Please enter a valid payment amount.');
+    return;
+  }
+
+  const dateObj = new Date(dateStr + 'T12:00:00');
+  const dateMillis = dateObj.getTime();
+
+  const payload = {
+    dateMillis,
+    paidByPersonId,
+    receivedByPersonId,
+    amount,
+    description
+  };
+
+  const btn = document.getElementById('payment-submit-btn');
+  const origText = btn ? btn.textContent : 'Save Payment';
+  isSavingPayment = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  try {
+    const res = await fetch('/api/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      closePaymentModal();
+      if (state.activeView === 'expenses') loadExpenses();
+      if (state.activeView === 'dashboard') loadDashboard();
+      if (state.activeView === 'reports') generateActiveReport();
+    } else {
+      alert('Error: ' + data.message);
+    }
+  } catch (err) {
+    alert('Failed to record payment: ' + err.message);
+  } finally {
+    isSavingPayment = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   }
 }
 
@@ -979,8 +1154,11 @@ function updateCustomSplitSummary() {
   }
 }
 
+let isSavingExpense = false;
 async function saveExpense(e) {
   e.preventDefault();
+  if (isSavingExpense) return;
+
   const id = document.getElementById('expense-edit-id').value;
   const dateStr = document.getElementById('expense-input-date').value;
   const description = document.getElementById('expense-input-desc').value.trim();
@@ -1047,6 +1225,14 @@ async function saveExpense(e) {
 
   const payload = { dateMillis, description, amount, category, ...payerPayload, ...splitPayload };
 
+  const btn = document.getElementById('expense-submit-btn');
+  const origText = btn ? btn.textContent : 'Save Expense';
+  isSavingExpense = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
   try {
     const url = id ? `/api/expenses/${id}` : '/api/expenses';
     const method = id ? 'PUT' : 'POST';
@@ -1068,6 +1254,12 @@ async function saveExpense(e) {
     }
   } catch (err) {
     alert('Failed to save expense: ' + err.message);
+  } finally {
+    isSavingExpense = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   }
 }
 

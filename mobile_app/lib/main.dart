@@ -850,6 +850,7 @@ class _ExpenseFormPageState extends State<ExpenseFormPage> {
   }
 
   Future<void> _save() async {
+    if (_loading) return;
     if (!_formKey.currentState!.validate()) return;
 
     final amount = _totalAmount;
