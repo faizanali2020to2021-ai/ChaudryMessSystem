@@ -387,10 +387,6 @@ router.get('/dashboard', async (req, res) => {
   try {
     const pool = await getPool();
 
-    // 1. Total expense
-    const totalExpRes = await pool.request().query('SELECT COALESCE(SUM(amount), 0) AS totalExpense FROM dbo.Expenses');
-    const totalExpense = parseFloat(totalExpRes.recordset[0].totalExpense) || 0;
-
     // 2. Person balances (active persons)
     const balancesQuery = `
       SELECT p.id AS personId, p.name AS personName, p.mobileNumber AS mobileNumber,
@@ -408,7 +404,14 @@ router.get('/dashboard', async (req, res) => {
       WHERE p.isActive = 1
       ORDER BY p.name ASC
     `;
-    const balancesRes = await pool.request().query(balancesQuery);
+
+    // 1 & 2 Executed in parallel
+    const [totalExpRes, balancesRes] = await Promise.all([
+      pool.request().query('SELECT COALESCE(SUM(amount), 0) AS totalExpense FROM dbo.Expenses'),
+      pool.request().query(balancesQuery)
+    ]);
+
+    const totalExpense = parseFloat(totalExpRes.recordset[0].totalExpense) || 0;
 
     const personBalances = balancesRes.recordset.map(row => {
       const paid = parseFloat(row.totalPaid) || 0;

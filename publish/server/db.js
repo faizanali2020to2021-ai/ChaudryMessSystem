@@ -239,6 +239,9 @@ async function createTiDBPool() {
 
 // Auto-create TiDB tables on startup if they don't exist
 async function initTiDBTables(pool) {
+  if (global._tidbTablesInitialized) {
+    return;
+  }
   try {
     // 1. AppUser
     await pool.query(`
@@ -344,6 +347,7 @@ async function initTiDBTables(pool) {
       ON DUPLICATE KEY UPDATE id=id;
     `);
 
+    global._tidbTablesInitialized = true;
     console.log(' TiDB tables & seed records verified successfully.');
   } catch (err) {
     console.error(' Error initializing TiDB tables:', err.message);
@@ -352,7 +356,12 @@ async function initTiDBTables(pool) {
 
 async function getPool() {
   if (!poolInstance) {
-    poolInstance = await createTiDBPool();
+    if (global._tidbPoolInstance) {
+      poolInstance = global._tidbPoolInstance;
+    } else {
+      poolInstance = await createTiDBPool();
+      global._tidbPoolInstance = poolInstance;
+    }
   }
   return poolInstance;
 }
