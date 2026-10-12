@@ -3,14 +3,15 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 const String kDefaultServerUrl = 'https://chaudrymess.vercel.app';
 
-
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const ChaudryMessApp());
 }
 
@@ -153,6 +154,7 @@ class _LoginPageState extends State<LoginPage> {
   final _passCtrl = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
+  bool _rememberMe = true;
   String _shopName = 'Chaudry Mess System';
   late String _serverUrl;
 
@@ -160,7 +162,34 @@ class _LoginPageState extends State<LoginPage> {
   void initState() {
     super.initState();
     _serverUrl = widget.serverUrl;
+    _loadSavedCredentials();
     _loadShopInfo();
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedRemember = prefs.getBool('remember_password') ?? true;
+      final savedUser = prefs.getString('saved_username');
+      final savedPass = prefs.getString('saved_password');
+      final savedUrl = prefs.getString('saved_server_url');
+
+      if (mounted) {
+        setState(() {
+          _rememberMe = savedRemember;
+          if (savedUser != null && (savedUser == 'admin' || savedUser == 'user')) {
+            _selectedUser = savedUser;
+          }
+          if (savedRemember && savedPass != null) {
+            _passCtrl.text = savedPass;
+          }
+          if (savedUrl != null && savedUrl.isNotEmpty) {
+            _serverUrl = savedUrl;
+            widget.onServerUrlChanged(savedUrl);
+          }
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadShopInfo() async {
@@ -188,6 +217,19 @@ class _LoginPageState extends State<LoginPage> {
       ).timeout(const Duration(seconds: 10));
       final data = json.decode(res.body);
       if (data['success'] == true) {
+        // Save or clear remembered password
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('remember_password', _rememberMe);
+          await prefs.setString('saved_username', _selectedUser);
+          await prefs.setString('saved_server_url', _serverUrl);
+          if (_rememberMe) {
+            await prefs.setString('saved_password', _passCtrl.text);
+          } else {
+            await prefs.remove('saved_password');
+          }
+        } catch (_) {}
+
         final api = ApiService(_serverUrl);
         api.username = _selectedUser;
         api.role = data['role'] ?? 'user';
@@ -322,7 +364,23 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                           onSubmitted: (_) => _login(),
                         ),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 8),
+
+                        // Remember Password Checkbox
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: const Text(
+                            'Remember Password',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                          ),
+                          value: _rememberMe,
+                          onChanged: (val) {
+                            setState(() => _rememberMe = val ?? false);
+                          },
+                          controlAffinity: ListTileControlAffinity.leading,
+                        ),
+                        const SizedBox(height: 16),
 
                         ElevatedButton(
                           onPressed: _loading ? null : _login,
@@ -2567,6 +2625,43 @@ class _SettingsPageState extends State<SettingsPage> {
             title: const Text('Change Password'),
             trailing: const Icon(Icons.chevron_right),
             onTap: _showChangePassword,
+          ),
+          const Divider(height: 32),
+
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.red),
+            title: const Text('Logout', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            onTap: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Confirm Logout'),
+                  content: const Text('Do you want to log out of your account?'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Logout'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm == true && mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => LoginPage(
+                      serverUrl: widget.api.baseUrl,
+                      onServerUrlChanged: (_) {},
+                      onThemeChanged: widget.onThemeChanged,
+                      themeMode: widget.themeMode,
+                    ),
+                  ),
+                  (route) => false,
+                );
+              }
+            },
           ),
         ],
       ),
