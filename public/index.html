@@ -73,6 +73,14 @@
           <span class="nav-icon">💳</span>
           <span>Receive Payment</span>
         </div>
+        <div class="nav-item" onclick="openOpeningAdjustmentModal()">
+          <span class="nav-icon">⚖️</span>
+          <span>Opening Adjustment</span>
+        </div>
+        <div class="nav-item" onclick="openBatchesModal()">
+          <span class="nav-icon">📅</span>
+          <span>Batches (بیچ)</span>
+        </div>
         <div class="nav-item" onclick="switchView('persons')">
           <span class="nav-icon">👥</span>
           <span>Persons</span>
@@ -129,10 +137,12 @@
           </button>
           <h1 class="page-title" id="page-title">Dashboard</h1>
         </div>
-        <div class="top-bar-right">
+        <div class="top-bar-right" style="flex-wrap: wrap; gap: 8px;">
+          <button class="btn btn-sm" id="active-batch-pill" onclick="openBatchesModal()" style="background: rgba(99,102,241,0.12); color: #6366f1; border: 1px solid #6366f1; font-weight: 600; border-radius: 20px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;" title="Click to manage batches">📅 Batch: Loading...</button>
           <span id="user-role-badge" class="badge badge-green" style="font-size: 13px; font-weight: 700; padding: 6px 12px;">👑 Admin</span>
           <button class="btn btn-sm" onclick="toggleAIAssistant()" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; border: none; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; box-shadow: 0 2px 6px rgba(99,102,241,0.35);">✨ AI Voice</button>
           <button class="btn btn-secondary btn-sm" onclick="toggleTheme()">🌓 Theme</button>
+          <button class="btn btn-warning btn-sm" style="background-color: #F59E0B; border-color: #F59E0B; color: white;" onclick="openOpeningAdjustmentModal()">⚖️ Opening Adjustment</button>
           <button class="btn btn-success btn-sm" style="background-color: #10B981; border-color: #10B981; color: white;" onclick="openPaymentModal()">💳 Receive Payment</button>
           <button class="btn btn-primary btn-sm" onclick="openExpenseModal()">+ Add Expense</button>
         </div>
@@ -183,6 +193,7 @@
               <option value="amount_asc">Amount: Low to High</option>
             </select>
 
+            <button class="btn btn-warning" style="background-color: #F59E0B; border-color: #F59E0B; color: white;" onclick="openOpeningAdjustmentModal()">⚖️ Opening Adjustment</button>
             <button class="btn btn-success" style="background-color: #10B981; border-color: #10B981; color: white;" onclick="openPaymentModal()">💳 Receive Payment</button>
             <button class="btn btn-primary" onclick="openExpenseModal()">+ Add Expense</button>
           </div>
@@ -524,6 +535,126 @@
           <button type="submit" class="btn btn-success" id="payment-submit-btn" style="background-color: #10B981; border-color: #10B981; color: white;">Save Payment</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- OPENING ADJUSTMENT MODAL -->
+  <div id="opening-adjustment-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header" style="border-bottom: 2px solid #F59E0B;">
+        <h3 class="modal-title" id="opening-adjustment-modal-title" style="color: #F59E0B;">⚖️ Opening Adjustment (ابتدائی ایڈجسٹمنٹ)</h3>
+        <button class="modal-close" onclick="closeOpeningAdjustmentModal()">&times;</button>
+      </div>
+      <form id="opening-adjustment-form" onsubmit="saveOpeningAdjustment(event)">
+        <div class="modal-body">
+          
+          <div class="form-group">
+            <label class="form-label">Adjustment Date</label>
+            <input type="date" id="adj-input-date" class="form-control" style="width: 100%;" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 600;">Paid By / Adjusted By (کس نے دیا / کریڈٹ ممبر)</label>
+            <select id="adj-input-paid-by" class="form-control" style="width: 100%;" required>
+              <!-- Populated dynamically -->
+            </select>
+            <div style="color: #10B981; font-size: 11px; margin-top: 4px;">✅ اس ممبر کی Paid رقم / ایڈوانس بڑھ جائے گی (Credit)</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 600;">Received By / Adjusted For (کس کے ذمے / ڈیبٹ ممبر)</label>
+            <select id="adj-input-received-by" class="form-control" style="width: 100%;" required>
+              <!-- Populated dynamically -->
+            </select>
+            <div style="color: var(--danger, #ef4444); font-size: 11px; margin-top: 4px;">📌 اس ممبر کا Expense / شیئر بڑھ جائے گا (Debit)</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Adjustment Amount (Rs.)</label>
+            <input type="number" step="0.01" min="0.01" id="adj-input-amount" class="form-control" style="width: 100%; font-size: 18px; font-weight: bold; color: #F59E0B;" placeholder="0.00" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Description / Notes</label>
+            <input type="text" id="adj-input-desc" class="form-control" style="width: 100%;" placeholder="e.g. Previous month opening balance, Advance settlement">
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeOpeningAdjustmentModal()">Cancel</button>
+          <button type="submit" class="btn btn-warning" id="adj-submit-btn" style="background-color: #F59E0B; border-color: #F59E0B; color: white;">Save Opening Adjustment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- BATCHES MANAGEMENT MODAL -->
+  <div id="batches-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 720px;">
+      <div class="modal-header" style="border-bottom: 2px solid #6366F1;">
+        <h3 class="modal-title" style="color: #6366F1;">📅 Mess Batches (بیچ مینجمنٹ)</h3>
+        <button class="modal-close" onclick="closeBatchesModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        
+        <!-- Add / Edit Batch Form Card -->
+        <div style="background: var(--zebra); border: 1px solid var(--card-border); border-radius: var(--radius-md); padding: 16px; margin-bottom: 20px;">
+          <h4 id="batch-form-title" style="font-size: 14px; margin-bottom: 12px; font-weight: 700;">➕ Add / Edit Batch</h4>
+          <form id="batch-form" onsubmit="saveBatch(event)">
+            <input type="hidden" id="batch-edit-id" value="">
+            <div style="display: grid; grid-template-columns: 2fr 1.2fr 1.2fr 1.2fr; gap: 10px; align-items: end;">
+              <div>
+                <label class="form-label" style="font-size: 12px;">Batch Name</label>
+                <input type="text" id="batch-input-name" class="form-control" placeholder="e.g. Batch: 08 Oct - 31 Oct" required>
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 12px;">From Date</label>
+                <input type="date" id="batch-input-from" class="form-control" required>
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 12px;">To Date</label>
+                <input type="date" id="batch-input-to" class="form-control" required>
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 12px;">Status</label>
+                <select id="batch-input-status" class="form-control">
+                  <option value="active">Active (Current)</option>
+                  <option value="closed">Closed</option>
+                </select>
+              </div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="resetBatchForm()">Reset Form</button>
+              <button type="submit" class="btn btn-primary btn-sm" id="batch-submit-btn">Save Batch</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Batches Table List -->
+        <div style="font-weight: 700; font-size: 13px; margin-bottom: 8px;">📋 All Batches History:</div>
+        <div class="table-container" style="max-height: 280px; overflow-y: auto;">
+          <table class="app-table" id="batches-table">
+            <thead>
+              <tr>
+                <th>Batch Name</th>
+                <th>From Date</th>
+                <th>To Date</th>
+                <th>Status</th>
+                <th>Entries</th>
+                <th>Total Expense</th>
+                <th style="text-align: center;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="batches-table-body">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeBatchesModal()">Close</button>
+      </div>
     </div>
   </div>
 

@@ -386,6 +386,31 @@ router.delete('/persons/:id', async (req, res) => {
 router.get('/dashboard', async (req, res) => {
   try {
     const pool = await getPool();
+    const { batchId } = req.query;
+
+    let targetBatchId = batchId && !isNaN(parseInt(batchId, 10)) ? parseInt(batchId, 10) : null;
+    let activeBatch = null;
+
+    // Get active batch info
+    const bRes = await pool.request().query("SELECT TOP 1 id, name, fromDate, toDate, status FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
+    if (bRes.recordset.length > 0) {
+      activeBatch = bRes.recordset[0];
+      if (!targetBatchId) targetBatchId = activeBatch.id;
+    }
+
+    let batchExpWhere = '';
+    let batchPayersJoin = '';
+    let batchSharesJoin = '';
+    const poolReq1 = pool.request();
+    const poolReq2 = pool.request();
+
+    if (targetBatchId) {
+      poolReq1.input('bId', sql.BigInt, targetBatchId);
+      poolReq2.input('bId', sql.BigInt, targetBatchId);
+      batchExpWhere = ' WHERE batchId = @bId';
+      batchPayersJoin = ' JOIN dbo.Expenses ep ON ep.id = ExpensePayers.expenseId WHERE ep.batchId = @bId';
+      batchSharesJoin = ' JOIN dbo.Expenses es ON es.id = ExpenseShares.expenseId WHERE es.batchId = @bId';
+    }
 
     // 2. Person balances (active persons)
     const balancesQuery = `
@@ -395,11 +420,15 @@ router.get('/dashboard', async (req, res) => {
       FROM dbo.Persons p
       LEFT JOIN (
           SELECT personId AS pid, SUM(amountPaid) AS total
-          FROM dbo.ExpensePayers GROUP BY personId
+          FROM dbo.ExpensePayers
+          ${batchPayersJoin}
+          GROUP BY personId
       ) paid ON paid.pid = p.id
       LEFT JOIN (
           SELECT personId AS pid, SUM(shareAmount) AS total
-          FROM dbo.ExpenseShares GROUP BY personId
+          FROM dbo.ExpenseShares
+          ${batchSharesJoin}
+          GROUP BY personId
       ) share ON share.pid = p.id
       WHERE p.isActive = 1
       ORDER BY p.name ASC
@@ -407,8 +436,8 @@ router.get('/dashboard', async (req, res) => {
 
     // 1 & 2 Executed in parallel
     const [totalExpRes, balancesRes] = await Promise.all([
-      pool.request().query('SELECT COALESCE(SUM(amount), 0) AS totalExpense FROM dbo.Expenses'),
-      pool.request().query(balancesQuery)
+      poolReq1.query(`SELECT COALESCE(SUM(amount), 0) AS totalExpense FROM dbo.Expenses${batchExpWhere}`),
+      poolReq2.query(balancesQuery)
     ]);
 
     const totalExpense = parseFloat(totalExpRes.recordset[0].totalExpense) || 0;
@@ -430,6 +459,7 @@ router.get('/dashboard', async (req, res) => {
 
     res.json({
       success: true,
+      activeBatch,
       overallSummary: {
         totalExpense,
         totalPaid
@@ -448,18 +478,25 @@ router.get('/dashboard', async (req, res) => {
 // GET /api/expenses (search, filter, sort)
 router.get('/expenses', async (req, res) => {
   try {
-    const { searchQuery, personId, fromMillis, toMillis, sortBy } = req.query;
+    const { searchQuery, personId, fromMillis, toMillis, sortBy, batchId } = req.query;
     const pool = await getPool();
 
     let query = `
       SELECT e.id AS id, e.expenseDate AS date, e.description AS description, e.amount AS amount,
-             e.paidByPersonId AS paidByPersonId, p.name AS paidByName, e.category AS category
+             e.paidByPersonId AS paidByPersonId, p.name AS paidByName, e.category AS category,
+             e.batchId AS batchId, b.name AS batchName
       FROM dbo.Expenses e
       JOIN dbo.Persons p ON p.id = e.paidByPersonId
+      LEFT JOIN dbo.Batches b ON b.id = e.batchId
       WHERE 1=1
     `;
 
     const request = pool.request();
+
+    if (batchId && !isNaN(parseInt(batchId, 10))) {
+      request.input('batchFilter', sql.BigInt, parseInt(batchId, 10));
+      query += ` AND e.batchId = @batchFilter`;
+    }
 
     if (searchQuery && searchQuery.trim()) {
       request.input('search', sql.NVarChar(200), `%${searchQuery.trim()}%`);
@@ -600,6 +637,14 @@ router.post('/expenses', async (req, res) => {
     }
 
     const dateVal = dateMillis ? parseInt(dateMillis, 10) : Date.now();
+
+    // Resolve batchId: if not passed, get current active batch
+    let targetBatchId = req.body.batchId ? parseInt(req.body.batchId, 10) : null;
+    if (!targetBatchId) {
+      const bRes = await pool.request().query("SELECT TOP 1 id FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
+      if (bRes.recordset.length > 0) targetBatchId = bRes.recordset[0].id;
+    }
+
     await transaction.begin();
 
     // Insert expense
@@ -609,11 +654,12 @@ router.post('/expenses', async (req, res) => {
     insertExpReq.input('amount', sql.Decimal(18, 2), numAmount);
     insertExpReq.input('paidByPersonId', sql.BigInt, primaryPayer);
     insertExpReq.input('category', sql.NVarChar(50), category || null);
+    insertExpReq.input('batchId', sql.BigInt, targetBatchId || null);
 
     const expResult = await insertExpReq.query(`
-      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category)
+      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId)
       OUTPUT INSERTED.id
-      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category)
+      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId)
     `);
     const expenseId = expResult.recordset[0].id;
 
@@ -685,6 +731,13 @@ router.post('/payments', async (req, res) => {
     const desc = (description && description.trim()) ? description.trim() : `Payment from ${payerName} to ${receiverName}`;
     const dateVal = dateMillis ? parseInt(dateMillis, 10) : Date.now();
 
+    // Resolve batchId
+    let targetBatchId = req.body.batchId ? parseInt(req.body.batchId, 10) : null;
+    if (!targetBatchId) {
+      const bRes = await pool.request().query("SELECT TOP 1 id FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
+      if (bRes.recordset.length > 0) targetBatchId = bRes.recordset[0].id;
+    }
+
     await transaction.begin();
 
     // 1. Insert payment record in Expenses table with category = 'Payment'
@@ -694,11 +747,12 @@ router.post('/payments', async (req, res) => {
     insertExpReq.input('amount', sql.Decimal(18, 2), numAmount);
     insertExpReq.input('paidByPersonId', sql.BigInt, payerId);
     insertExpReq.input('category', sql.NVarChar(50), 'Payment');
+    insertExpReq.input('batchId', sql.BigInt, targetBatchId || null);
 
     const expResult = await insertExpReq.query(`
-      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category)
+      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId)
       OUTPUT INSERTED.id
-      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category)
+      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId)
     `);
     const expenseId = expResult.recordset[0].id;
 
@@ -721,6 +775,222 @@ router.post('/payments', async (req, res) => {
   } catch (err) {
     if (transaction._acquiredConnection) await transaction.rollback();
     console.error('Error recording payment:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/opening-adjustments (Opening Balance Adjustment - Credit/Debit Settlement)
+router.post('/opening-adjustments', async (req, res) => {
+  const pool = await getPool();
+  const transaction = new sql.Transaction(pool);
+
+  try {
+    const { dateMillis, description, amount, paidByPersonId, receivedByPersonId, batchId } = req.body;
+
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      return res.status(400).json({ success: false, message: 'Enter a valid adjustment amount' });
+    }
+    const payerId = parseInt(paidByPersonId, 10);
+    const receiverId = parseInt(receivedByPersonId, 10);
+
+    if (!payerId || isNaN(payerId)) {
+      return res.status(400).json({ success: false, message: 'Select who paid / adjusted (Paid By)' });
+    }
+    if (!receiverId || isNaN(receiverId)) {
+      return res.status(400).json({ success: false, message: 'Select who received / dues for (Received By)' });
+    }
+    if (payerId === receiverId) {
+      return res.status(400).json({ success: false, message: 'Paid By and Received By cannot be the same person' });
+    }
+
+    // Get names for default description
+    const pNamesRes = await pool.request()
+      .input('payerId', sql.BigInt, payerId)
+      .input('receiverId', sql.BigInt, receiverId)
+      .query('SELECT id, name FROM dbo.Persons WHERE id IN (@payerId, @receiverId)');
+    
+    let payerName = 'Member';
+    let receiverName = 'Member';
+    for (const r of pNamesRes.recordset) {
+      if (r.id == payerId) payerName = r.name;
+      if (r.id == receiverId) receiverName = r.name;
+    }
+
+    const desc = (description && description.trim()) ? description.trim() : `Opening Adjustment: ${payerName} -> ${receiverName}`;
+    const dateVal = dateMillis ? parseInt(dateMillis, 10) : Date.now();
+
+    // Resolve batchId
+    let targetBatchId = batchId ? parseInt(batchId, 10) : null;
+    if (!targetBatchId) {
+      const bRes = await pool.request().query("SELECT TOP 1 id FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
+      if (bRes.recordset.length > 0) targetBatchId = bRes.recordset[0].id;
+    }
+
+    await transaction.begin();
+
+    // 1. Insert into Expenses with category = 'Opening Adjustment'
+    const insertExpReq = new sql.Request(transaction);
+    insertExpReq.input('expenseDate', sql.BigInt, dateVal);
+    insertExpReq.input('description', sql.NVarChar(500), desc);
+    insertExpReq.input('amount', sql.Decimal(18, 2), numAmount);
+    insertExpReq.input('paidByPersonId', sql.BigInt, payerId);
+    insertExpReq.input('category', sql.NVarChar(50), 'Opening Adjustment');
+    insertExpReq.input('batchId', sql.BigInt, targetBatchId || null);
+
+    const expResult = await insertExpReq.query(`
+      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId)
+      OUTPUT INSERTED.id
+      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId)
+    `);
+    const expenseId = expResult.recordset[0].id;
+
+    // 2. Insert into ExpensePayers (Payer gets credit)
+    const pReq = new sql.Request(transaction);
+    pReq.input('expenseId', sql.BigInt, expenseId);
+    pReq.input('personId', sql.BigInt, payerId);
+    pReq.input('amountPaid', sql.Decimal(18, 2), numAmount);
+    await pReq.query(`INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid) VALUES (@expenseId, @personId, @amountPaid)`);
+
+    // 3. Insert into ExpenseShares (Receiver gets debit)
+    const shareReq = new sql.Request(transaction);
+    shareReq.input('expenseId', sql.BigInt, expenseId);
+    shareReq.input('personId', sql.BigInt, receiverId);
+    shareReq.input('shareAmount', sql.Decimal(18, 2), numAmount);
+    await shareReq.query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount) VALUES (@expenseId, @personId, @shareAmount)`);
+
+    await transaction.commit();
+    res.json({ success: true, expenseId, message: 'Opening adjustment recorded successfully' });
+  } catch (err) {
+    if (transaction._acquiredConnection) await transaction.rollback();
+    console.error('Error recording opening adjustment:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Batches Management
+// -----------------------------------------------------------------------------
+
+// GET /api/batches (List all batches with expense count and total)
+router.get('/batches', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const query = `
+      SELECT b.id, b.name, b.fromDate, b.toDate, b.status, b.createdAt,
+             COUNT(e.id) AS totalEntries,
+             COALESCE(SUM(e.amount), 0) AS totalExpense
+      FROM dbo.Batches b
+      LEFT JOIN dbo.Expenses e ON e.batchId = b.id
+      GROUP BY b.id, b.name, b.fromDate, b.toDate, b.status, b.createdAt
+      ORDER BY b.fromDate DESC, b.id DESC
+    `;
+    const result = await pool.request().query(query);
+    res.json({ success: true, batches: result.recordset });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET /api/batches/active (Get currently active batch)
+router.get('/batches/active', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().query("SELECT TOP 1 id, name, fromDate, toDate, status, createdAt FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
+    const activeBatch = result.recordset[0] || null;
+    res.json({ success: true, batch: activeBatch });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/batches (Create new batch)
+router.post('/batches', async (req, res) => {
+  try {
+    const { name, fromDate, toDate, status } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: 'Batch name is required' });
+    }
+    const pool = await getPool();
+    const batchStatus = (status || 'active').toLowerCase() === 'active' ? 'active' : 'closed';
+    const fromMillis = fromDate ? parseInt(fromDate, 10) : Date.now();
+    const toMillis = toDate ? parseInt(toDate, 10) : Date.now();
+
+    if (batchStatus === 'active') {
+      await pool.request().query("UPDATE dbo.Batches SET status = 'closed' WHERE status = 'active'");
+    }
+
+    const insertReq = pool.request()
+      .input('name', sql.NVarChar(150), name.trim())
+      .input('fromDate', sql.BigInt, fromMillis)
+      .input('toDate', sql.BigInt, toMillis)
+      .input('status', sql.NVarChar(20), batchStatus);
+
+    const result = await insertReq.query(`
+      INSERT INTO dbo.Batches (name, fromDate, toDate, status)
+      OUTPUT INSERTED.id
+      VALUES (@name, @fromDate, @toDate, @status)
+    `);
+    const newId = result.recordset[0].id;
+
+    res.json({ success: true, id: newId, message: 'Batch created successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PUT /api/batches/:id (Update batch)
+router.put('/batches/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { name, fromDate, toDate, status } = req.body;
+    const pool = await getPool();
+
+    const batchStatus = (status || 'active').toLowerCase() === 'active' ? 'active' : 'closed';
+    const fromMillis = fromDate ? parseInt(fromDate, 10) : Date.now();
+    const toMillis = toDate ? parseInt(toDate, 10) : Date.now();
+
+    if (batchStatus === 'active') {
+      await pool.request().input('id', sql.BigInt, id).query("UPDATE dbo.Batches SET status = 'closed' WHERE id <> @id AND status = 'active'");
+    }
+
+    await pool.request()
+      .input('id', sql.BigInt, id)
+      .input('name', sql.NVarChar(150), (name || '').trim())
+      .input('fromDate', sql.BigInt, fromMillis)
+      .input('toDate', sql.BigInt, toMillis)
+      .input('status', sql.NVarChar(20), batchStatus)
+      .query(`
+        UPDATE dbo.Batches 
+        SET name = @name, fromDate = @fromDate, toDate = @toDate, status = @status
+        WHERE id = @id
+      `);
+
+    res.json({ success: true, message: 'Batch updated successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/batches/:id/status (Toggle batch status)
+router.post('/batches/:id/status', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { status } = req.body;
+    const pool = await getPool();
+    const newStatus = status === 'active' ? 'active' : 'closed';
+
+    if (newStatus === 'active') {
+      await pool.request().input('id', sql.BigInt, id).query("UPDATE dbo.Batches SET status = 'closed' WHERE id <> @id AND status = 'active'");
+    }
+
+    await pool.request()
+      .input('id', sql.BigInt, id)
+      .input('status', sql.NVarChar(20), newStatus)
+      .query("UPDATE dbo.Batches SET status = @status WHERE id = @id");
+
+    res.json({ success: true, message: `Batch status changed to ${newStatus}` });
+  } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });

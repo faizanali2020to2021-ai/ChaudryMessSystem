@@ -326,6 +326,28 @@ async function initTiDBTables(pool) {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // 7. Batches
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS Batches (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        fromDate BIGINT NOT NULL,
+        toDate BIGINT NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'active',
+        createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX IX_Batches_Status (status),
+        INDEX IX_Batches_FromDate (fromDate),
+        INDEX IX_Batches_ToDate (toDate)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    // Ensure batchId column exists on Expenses
+    try {
+      await pool.query(`ALTER TABLE Expenses ADD COLUMN batchId BIGINT NULL;`);
+    } catch (_) {
+      // Column may already exist
+    }
+
     // Seed default Admin and User if not present
     await pool.query(`
       INSERT INTO AppUser (id, username, shopName, passwordHash, passwordSalt, shopAddress, hasLoggedInOnce, role)
@@ -346,6 +368,29 @@ async function initTiDBTables(pool) {
       VALUES (1, 'chaudrymess@gmail.com', NULL, NULL)
       ON DUPLICATE KEY UPDATE id=id;
     `);
+
+    // Seed 8 Oct 2026 to 31 Oct 2026 batch if none exists
+    const [batchCheck] = await pool.query(`SELECT id FROM Batches LIMIT 1`);
+    let activeBatchId = null;
+    if (!batchCheck || batchCheck.length === 0) {
+      const fromMillis = new Date('2026-10-08T00:00:00+05:00').getTime();
+      const toMillis = new Date('2026-10-31T23:59:59+05:00').getTime();
+      const [bInsert] = await pool.query(`
+        INSERT INTO Batches (name, fromDate, toDate, status)
+        VALUES ('Batch: 08 Oct 2026 - 31 Oct 2026', ?, ?, 'active')
+      `, [fromMillis, toMillis]);
+      activeBatchId = bInsert.insertId;
+    } else {
+      const [activeRows] = await pool.query(`SELECT id FROM Batches WHERE status = 'active' ORDER BY id DESC LIMIT 1`);
+      if (activeRows && activeRows.length > 0) {
+        activeBatchId = activeRows[0].id;
+      }
+    }
+
+    // Mark all existing expenses with active batchId
+    if (activeBatchId) {
+      await pool.query(`UPDATE Expenses SET batchId = ? WHERE batchId IS NULL`, [activeBatchId]);
+    }
 
     global._tidbTablesInitialized = true;
     console.log(' TiDB tables & seed records verified successfully.');

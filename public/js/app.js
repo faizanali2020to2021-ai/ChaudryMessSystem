@@ -322,6 +322,9 @@ function applyUserIdentity() {
   // Refresh active views so delete buttons update according to role
   if (state.activeView === 'expenses') loadExpenses();
   if (state.activeView === 'persons') loadPersonsTable();
+
+  // Load active batch details
+  loadActiveBatch();
 }
 
 // -----------------------------------------------------------------------------
@@ -454,12 +457,16 @@ function populatePersonSelects() {
   const reportPerson = document.getElementById('report-person-select');
   const paymentPaidBy = document.getElementById('payment-input-paid-by');
   const paymentReceivedBy = document.getElementById('payment-input-received-by');
+  const adjPaidBy = document.getElementById('adj-input-paid-by');
+  const adjReceivedBy = document.getElementById('adj-input-received-by');
 
   // Preserve selections if possible
   const currentPaid = paidBy ? paidBy.value : '';
   const currentReport = reportPerson ? reportPerson.value : '';
   const currentPayPaid = paymentPaidBy ? paymentPaidBy.value : '';
   const currentPayRecv = paymentReceivedBy ? paymentReceivedBy.value : '';
+  const currentAdjPaid = adjPaidBy ? adjPaidBy.value : '';
+  const currentAdjRecv = adjReceivedBy ? adjReceivedBy.value : '';
 
   const optionsHtml = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
 
@@ -488,6 +495,20 @@ function populatePersonSelects() {
       paymentReceivedBy.value = currentPayRecv;
     } else if (state.persons.length > 1) {
       paymentReceivedBy.value = state.persons[1].id;
+    }
+  }
+
+  if (adjPaidBy) {
+    adjPaidBy.innerHTML = optionsHtml;
+    if (currentAdjPaid) adjPaidBy.value = currentAdjPaid;
+  }
+
+  if (adjReceivedBy) {
+    adjReceivedBy.innerHTML = optionsHtml;
+    if (currentAdjRecv) {
+      adjReceivedBy.value = currentAdjRecv;
+    } else if (state.persons.length > 1) {
+      adjReceivedBy.value = state.persons[1].id;
     }
   }
 }
@@ -757,16 +778,21 @@ async function loadExpenses() {
     state.expenses.forEach(e => {
       const tr = document.createElement('tr');
       const isPayment = e.category === 'Payment';
+      const isAdjustment = e.category === 'Opening Adjustment';
       const catBadge = isPayment
         ? `<span class="badge" style="background-color: #d1fae5; color: #065f46; font-weight: 600;">💳 Payment</span>`
-        : (e.category ? `<span class="badge badge-primary">${e.category}</span>` : '<span style="color: var(--text-muted); font-size: 12px;">—</span>');
+        : (isAdjustment
+        ? `<span class="badge" style="background-color: #fef3c7; color: #92400e; font-weight: 600;">⚖️ Opening Adj</span>`
+        : (e.category ? `<span class="badge badge-primary">${e.category}</span>` : '<span style="color: var(--text-muted); font-size: 12px;">—</span>'));
       
+      const batchLabel = e.batchName ? `<div style="font-size: 11px; color: var(--text-muted); font-weight: normal;">🏷️ ${e.batchName}</div>` : '';
+
       tr.innerHTML = `
         <td>${formatDate(Number(e.date))}</td>
-        <td><strong>${e.description}</strong></td>
+        <td><strong>${e.description}</strong>${batchLabel}</td>
         <td>${catBadge}</td>
         <td>${e.paidByName}</td>
-        <td style="text-align: right; font-weight: 700; ${isPayment ? 'color: #10B981;' : ''}">${formatCurrency(e.amount)}</td>
+        <td style="text-align: right; font-weight: 700; ${isPayment ? 'color: #10B981;' : (isAdjustment ? 'color: #F59E0B;' : '')}">${formatCurrency(e.amount)}</td>
         <td style="text-align: center;">
           <button class="btn btn-secondary btn-sm" onclick="openExpenseModal(${e.id})">Edit</button>
           ${isAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">Delete</button>` : ''}
@@ -2367,7 +2393,28 @@ function executeAICommand(rawCommand) {
     return;
   }
 
-  // 3. EXPENSE SMART AUTO-FILL COMMANDS
+  // 3. OPENING ADJUSTMENT COMMANDS
+  if (cmd.includes('opening') || cmd.includes('ابتدائی') || cmd.includes('adjustment') || cmd.includes('ایڈجسٹمنٹ')) {
+    openOpeningAdjustmentModal();
+    const amt = parseSpokenAmount(cmd);
+    if (amt) {
+      const amtInput = document.getElementById('adj-input-amount');
+      if (amtInput) amtInput.value = amt;
+    }
+    showAIFeedback('⚖️ Opening Adjustment Form opened' + (amt ? ` with Rs. ${amt}` : '') + '!');
+    setTimeout(() => closeAIAssistant(), 1200);
+    return;
+  }
+
+  // 4. BATCHES MANAGEMENT COMMANDS
+  if (cmd.includes('batch') || cmd.includes('بیچ')) {
+    openBatchesModal();
+    showAIFeedback('📅 Batches Management opened!');
+    setTimeout(() => closeAIAssistant(), 1200);
+    return;
+  }
+
+  // 5. EXPENSE SMART AUTO-FILL COMMANDS
   // Check if speech contains expense keywords, amounts, categories or names
   const amt = parseSpokenAmount(cmd);
   const matchedPerson = matchPerson(cmd);
@@ -2438,4 +2485,287 @@ function executeAICommand(rawCommand) {
   // Fallback: Show understanding message
   showAIFeedback(`🤖 Command: "${originalText}" (کمانڈ واضح نہیں، دوبارہ بولیں)`, false);
 }
+
+// -----------------------------------------------------------------------------
+// Opening Adjustment Modal & Actions
+// -----------------------------------------------------------------------------
+function openOpeningAdjustmentModal() {
+  const modal = document.getElementById('opening-adjustment-modal');
+  const dateInput = document.getElementById('adj-input-date');
+  const amountInput = document.getElementById('adj-input-amount');
+  const descInput = document.getElementById('adj-input-desc');
+
+  populatePersonSelects();
+
+  dateInput.value = toInputDate(new Date());
+  amountInput.value = '';
+  descInput.value = 'Opening Balance';
+
+  modal.style.display = 'flex';
+}
+
+function closeOpeningAdjustmentModal() {
+  const modal = document.getElementById('opening-adjustment-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+let isSavingOpeningAdjustment = false;
+async function saveOpeningAdjustment(e) {
+  e.preventDefault();
+  if (isSavingOpeningAdjustment) return;
+
+  const dateStr = document.getElementById('adj-input-date').value;
+  const paidByPersonId = parseInt(document.getElementById('adj-input-paid-by').value, 10);
+  const receivedByPersonId = parseInt(document.getElementById('adj-input-received-by').value, 10);
+  const amount = parseFloat(document.getElementById('adj-input-amount').value);
+  const description = document.getElementById('adj-input-desc').value.trim() || 'Opening Balance';
+
+  if (!paidByPersonId) {
+    alert('Please select who paid / brought forward opening balance (Paid By / Adjusted By).');
+    return;
+  }
+  if (!receivedByPersonId) {
+    alert('Please select who received / adjusted for (Received By / Adjusted For).');
+    return;
+  }
+  if (paidByPersonId === receivedByPersonId) {
+    alert('Paid By and Received By cannot be the same member! Please select different members.');
+    return;
+  }
+  if (isNaN(amount) || amount <= 0) {
+    alert('Please enter a valid adjustment amount.');
+    return;
+  }
+
+  const dateObj = new Date(dateStr + 'T12:00:00');
+  const dateMillis = dateObj.getTime();
+
+  const payload = {
+    dateMillis,
+    paidByPersonId,
+    receivedByPersonId,
+    amount,
+    description
+  };
+
+  const btn = document.getElementById('adj-submit-btn');
+  const origText = btn ? btn.textContent : 'Save Opening Adjustment';
+  isSavingOpeningAdjustment = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  try {
+    const res = await fetch('/api/opening-adjustments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      closeOpeningAdjustmentModal();
+      if (state.activeView === 'expenses') loadExpenses();
+      if (state.activeView === 'dashboard') loadDashboard();
+      if (state.activeView === 'reports') generateActiveReport();
+      alert('Opening Adjustment saved successfully!');
+    } else {
+      alert('Error: ' + data.message);
+    }
+  } catch (err) {
+    alert('Failed to record opening adjustment: ' + err.message);
+  } finally {
+    isSavingOpeningAdjustment = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Batch Management
+// -----------------------------------------------------------------------------
+async function loadActiveBatch() {
+  try {
+    const res = await fetch('/api/batches/active');
+    const data = await res.json();
+    const batchPill = document.getElementById('active-batch-pill');
+
+    if (data.success && data.batch) {
+      state.activeBatch = data.batch;
+      if (batchPill) {
+        batchPill.innerHTML = `📅 <strong>${data.batch.name}</strong> <span style="font-size: 10px; opacity: 0.85; margin-left: 2px;">(${data.batch.fromDate} to ${data.batch.toDate})</span>`;
+        batchPill.title = `Current active batch: ${data.batch.name}. Click to manage.`;
+      }
+    } else {
+      state.activeBatch = null;
+      if (batchPill) {
+        batchPill.innerHTML = `📅 <strong>No Active Batch</strong>`;
+        batchPill.title = 'No active batch set. Click to create or activate a batch.';
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load active batch:', err);
+  }
+}
+
+function openBatchesModal() {
+  resetBatchForm();
+  loadBatchesTable();
+  const modal = document.getElementById('batches-modal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeBatchesModal() {
+  const modal = document.getElementById('batches-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function resetBatchForm() {
+  document.getElementById('batch-edit-id').value = '';
+  document.getElementById('batch-input-name').value = '';
+  document.getElementById('batch-input-from').value = '';
+  document.getElementById('batch-input-to').value = '';
+  document.getElementById('batch-input-status').value = 'active';
+  const title = document.getElementById('batch-form-title');
+  if (title) title.textContent = '➕ Add / Edit Batch';
+  const btn = document.getElementById('batch-submit-btn');
+  if (btn) btn.textContent = 'Save Batch';
+}
+
+async function loadBatchesTable() {
+  const tbody = document.getElementById('batches-table-body');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;">Loading batches...</td></tr>';
+
+  try {
+    const res = await fetch('/api/batches');
+    const data = await res.json();
+    if (!data.success) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger);">Failed to load batches: ${data.message}</td></tr>`;
+      return;
+    }
+
+    const batches = data.batches || [];
+    if (batches.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: var(--text-muted);">No batches created yet.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = batches.map(b => {
+      const isActive = b.status === 'active';
+      const statusBadge = isActive
+        ? '<span class="badge badge-green">Active (Current)</span>'
+        : '<span class="badge" style="background:#e2e8f0; color:#475569;">Closed</span>';
+      
+      const toggleBtn = isActive
+        ? `<button class="btn btn-secondary btn-sm" onclick="toggleBatchStatus(${b.id}, 'closed')">Close Batch</button>`
+        : `<button class="btn btn-primary btn-sm" onclick="toggleBatchStatus(${b.id}, 'active')">Set Active</button>`;
+
+      return `
+        <tr>
+          <td><strong>${b.name}</strong></td>
+          <td>${b.fromDate}</td>
+          <td>${b.toDate}</td>
+          <td>${statusBadge}</td>
+          <td style="text-align: right;">${b.entryCount || 0}</td>
+          <td style="text-align: right; font-weight: 700;">${formatCurrency(b.totalExpense || 0)}</td>
+          <td style="text-align: center; white-space: nowrap;">
+            <button class="btn btn-secondary btn-sm" onclick='editBatch(${JSON.stringify(b).replace(/'/g, "&#39;")})'>Edit</button>
+            ${toggleBtn}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger);">${err.message}</td></tr>`;
+  }
+}
+
+function editBatch(batch) {
+  document.getElementById('batch-edit-id').value = batch.id;
+  document.getElementById('batch-input-name').value = batch.name;
+  document.getElementById('batch-input-from').value = batch.fromDate;
+  document.getElementById('batch-input-to').value = batch.toDate;
+  document.getElementById('batch-input-status').value = batch.status || 'active';
+  const title = document.getElementById('batch-form-title');
+  if (title) title.textContent = `✏️ Edit Batch #${batch.id}`;
+  const btn = document.getElementById('batch-submit-btn');
+  if (btn) btn.textContent = 'Update Batch';
+}
+
+async function saveBatch(e) {
+  e.preventDefault();
+  const id = document.getElementById('batch-edit-id').value;
+  const name = document.getElementById('batch-input-name').value.trim();
+  const fromDate = document.getElementById('batch-input-from').value;
+  const toDate = document.getElementById('batch-input-to').value;
+  const status = document.getElementById('batch-input-status').value;
+
+  if (!name || !fromDate || !toDate) {
+    alert('Please fill out batch name, from date, and to date.');
+    return;
+  }
+
+  const payload = { name, fromDate, toDate, status };
+  const btn = document.getElementById('batch-submit-btn');
+  const origText = btn ? btn.textContent : 'Save Batch';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  try {
+    const url = id ? `/api/batches/${id}` : '/api/batches';
+    const method = id ? 'PUT' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      resetBatchForm();
+      await loadBatchesTable();
+      await loadActiveBatch();
+      if (state.activeView === 'dashboard') loadDashboard();
+      if (state.activeView === 'expenses') loadExpenses();
+      alert('Batch saved successfully!');
+    } else {
+      alert('Error: ' + data.message);
+    }
+  } catch (err) {
+    alert('Failed to save batch: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
+  }
+}
+
+async function toggleBatchStatus(id, newStatus) {
+  try {
+    const res = await fetch(`/api/batches/${id}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus })
+    });
+    const data = await res.json();
+    if (data.success) {
+      await loadBatchesTable();
+      await loadActiveBatch();
+      if (state.activeView === 'dashboard') loadDashboard();
+      if (state.activeView === 'expenses') loadExpenses();
+    } else {
+      alert('Error: ' + data.message);
+    }
+  } catch (err) {
+    alert('Failed to change batch status: ' + err.message);
+  }
+}
+
 

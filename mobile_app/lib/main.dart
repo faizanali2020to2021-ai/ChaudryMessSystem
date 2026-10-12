@@ -450,7 +450,6 @@ class _DashboardPageState extends State<DashboardPage> {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Dashboard'),
@@ -465,6 +464,56 @@ class _DashboardPageState extends State<DashboardPage> {
                   child: ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
+                      // Active Batch Banner
+                      if (_data?['activeBatch'] != null) ...[
+                        Card(
+                          color: const Color(0xFF6366F1).withOpacity(0.08),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            side: const BorderSide(color: Color(0xFF6366F1), width: 1.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            child: Row(
+                              children: [
+                                const CircleAvatar(
+                                  backgroundColor: Color(0xFF6366F1),
+                                  radius: 18,
+                                  child: Icon(Icons.calendar_month, color: Colors.white, size: 20),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _data!['activeBatch']['name'] ?? 'Active Batch',
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF4338CA)),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '${_data!['activeBatch']['fromDate']} to ${_data!['activeBatch']['toDate']}',
+                                        style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF10B981),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Text('ACTIVE', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+
                       // Summary cards
                       Row(children: [
                         _StatCard('Total Expenses', formatCurrency(_data?['overallSummary']?['totalExpense'] ?? 0), Icons.receipt, Colors.indigo),
@@ -630,6 +679,18 @@ class _ExpensesPageState extends State<ExpensesPage> {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           FloatingActionButton.extended(
+            heroTag: 'fab_adjustment',
+            backgroundColor: const Color(0xFFF59E0B),
+            foregroundColor: Colors.white,
+            icon: const Icon(Icons.balance),
+            label: const Text('Opening Adj', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () async {
+              final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => OpeningAdjustmentFormPage(api: widget.api)));
+              if (result == true) _load();
+            },
+          ),
+          const SizedBox(height: 10),
+          FloatingActionButton.extended(
             heroTag: 'fab_payment',
             backgroundColor: const Color(0xFF10B981),
             foregroundColor: Colors.white,
@@ -640,7 +701,7 @@ class _ExpensesPageState extends State<ExpensesPage> {
               if (result == true) _load();
             },
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           FloatingActionButton.extended(
             heroTag: 'fab_expense',
             icon: const Icon(Icons.add),
@@ -664,6 +725,7 @@ class _ExpensesPageState extends State<ExpensesPage> {
                       itemBuilder: (_, i) {
                         final e = _filtered[i];
                         final isPayment = e['category'] == 'Payment';
+                        final isAdjustment = e['category'] == 'Opening Adjustment';
                         return Card(
                           margin: const EdgeInsets.only(bottom: 8),
                           child: ListTile(
@@ -680,7 +742,9 @@ class _ExpensesPageState extends State<ExpensesPage> {
                                   formatCurrency(e['amount']),
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
-                                    color: isPayment ? const Color(0xFF10B981) : Colors.indigo,
+                                    color: isPayment
+                                        ? const Color(0xFF10B981)
+                                        : (isAdjustment ? const Color(0xFFF59E0B) : Colors.indigo),
                                   ),
                                 ),
                                 const SizedBox(width: 4),
@@ -711,6 +775,7 @@ class _ExpensesPageState extends State<ExpensesPage> {
   Color _categoryColor(String? cat) {
     switch (cat) {
       case 'Payment': return const Color(0xFF10B981);
+      case 'Opening Adjustment': return const Color(0xFFF59E0B);
       case 'Breakfast': return Colors.orange;
       case 'Lunch': return Colors.green;
       case 'Dinner': return Colors.indigo;
@@ -721,6 +786,7 @@ class _ExpensesPageState extends State<ExpensesPage> {
   IconData _categoryIcon(String? cat) {
     switch (cat) {
       case 'Payment': return Icons.payments;
+      case 'Opening Adjustment': return Icons.balance;
       case 'Breakfast': return Icons.wb_sunny;
       case 'Lunch': return Icons.restaurant;
       case 'Dinner': return Icons.nightlight;
@@ -728,7 +794,6 @@ class _ExpensesPageState extends State<ExpensesPage> {
     }
   }
 }
-
 
 // ---------------------------------------------------------------------------
 // Expense Form Page (Add / Edit)
@@ -932,7 +997,6 @@ class _ExpenseFormPageState extends State<ExpenseFormPage> {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.expenseId != null ? 'Edit Expense' : 'Add Expense'),
@@ -1396,6 +1460,213 @@ class _PaymentFormPageState extends State<PaymentFormPage> {
 }
 
 // ---------------------------------------------------------------------------
+// Opening Adjustment Form Page (Member to Member Opening / Advance Setup)
+// ---------------------------------------------------------------------------
+class OpeningAdjustmentFormPage extends StatefulWidget {
+  final ApiService api;
+  const OpeningAdjustmentFormPage({super.key, required this.api});
+  @override
+  State<OpeningAdjustmentFormPage> createState() => _OpeningAdjustmentFormPageState();
+}
+
+class _OpeningAdjustmentFormPageState extends State<OpeningAdjustmentFormPage> {
+  final _formKey = GlobalKey<FormState>();
+  final _descCtrl = TextEditingController(text: 'Opening Balance');
+  final _amtCtrl = TextEditingController();
+  DateTime _date = DateTime.now();
+  bool _loading = false;
+  bool _loadingInit = false;
+  List<dynamic> _persons = [];
+  int? _payerId;
+  int? _receiverId;
+
+  @override
+  void initState() {
+    super.initState();
+    _initData();
+  }
+
+  @override
+  void dispose() {
+    _descCtrl.dispose();
+    _amtCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initData() async {
+    setState(() => _loadingInit = true);
+    try {
+      final data = await widget.api.get('/persons');
+      _persons = data['persons'] ?? [];
+      if (_persons.isNotEmpty) {
+        _payerId = _persons[0]['id'] as int;
+        if (_persons.length > 1) {
+          _receiverId = _persons[1]['id'] as int;
+        } else {
+          _receiverId = _persons[0]['id'] as int;
+        }
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+    if (mounted) setState(() => _loadingInit = false);
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_payerId == null || _receiverId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select both Credit and Debit member')));
+      return;
+    }
+    if (_payerId == _receiverId) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Paid By and Received By cannot be the same member!')));
+      return;
+    }
+
+    setState(() => _loading = true);
+    try {
+      final dateMillis = DateTime(_date.year, _date.month, _date.day, 12, 0, 0).millisecondsSinceEpoch;
+      final body = {
+        'dateMillis': dateMillis,
+        'paidByPersonId': _payerId,
+        'receivedByPersonId': _receiverId,
+        'amount': double.parse(_amtCtrl.text),
+        'description': _descCtrl.text.trim().isEmpty ? 'Opening Balance' : _descCtrl.text.trim(),
+      };
+
+      final result = await widget.api.post('/opening-adjustments', body);
+      if (result['success'] == true) {
+        if (mounted) Navigator.pop(context, true);
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message'] ?? 'Error')));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Opening Adjustment'),
+        actions: [
+          if (_loading)
+            const Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+          else
+            TextButton(onPressed: _save, child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFF59E0B)))),
+        ],
+      ),
+      body: _loadingInit
+          ? const Center(child: CircularProgressIndicator())
+          : Form(
+              key: _formKey,
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.calendar_today),
+                      title: const Text('Adjustment Date'),
+                      subtitle: Text(DateFormat('dd MMMM yyyy').format(_date)),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () async {
+                        final d = await showDatePicker(
+                          context: context,
+                          initialDate: _date,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2035),
+                        );
+                        if (d != null) setState(() => _date = d);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Paid By / Adjusted By
+                  const Text('Paid By / Adjusted By (کس نے دیا / کریڈٹ ممبر - Credit)', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<int>(
+                    value: _payerId,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.person, color: Color(0xFF10B981)),
+                      helperText: 'اس ممبر کی Paid رقم / ایڈوانس بڑھ جائے گی',
+                      helperStyle: TextStyle(color: Color(0xFF10B981)),
+                    ),
+                    items: _persons.map((p) => DropdownMenuItem<int>(value: p['id'] as int, child: Text(p['name'] as String))).toList(),
+                    onChanged: (v) => setState(() => _payerId = v),
+                    validator: (v) => v == null ? 'Select who paid' : null,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Received By / Adjusted For
+                  const Text('Received By / Adjusted For (کس کے ذمے / ڈیبٹ ممبر - Debit)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<int>(
+                    value: _receiverId,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.person_outline, color: Colors.red),
+                      helperText: 'اس ممبر کا خرچہ / حصہ بڑھ جائے گا',
+                      helperStyle: TextStyle(color: Colors.red),
+                    ),
+                    items: _persons.map((p) => DropdownMenuItem<int>(value: p['id'] as int, child: Text(p['name'] as String))).toList(),
+                    onChanged: (v) => setState(() => _receiverId = v),
+                    validator: (v) => v == null ? 'Select who received' : null,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Amount
+                  TextFormField(
+                    controller: _amtCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
+                    decoration: const InputDecoration(
+                      labelText: 'Adjustment Amount (Rs.) *',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.balance, color: Color(0xFFF59E0B)),
+                    ),
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFFF59E0B)),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'Required';
+                      if ((double.tryParse(v) ?? 0) <= 0) return 'Enter a valid amount';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Description
+                  TextFormField(
+                    controller: _descCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Description / Notes (Optional)',
+                      hintText: 'e.g. Opening Balance, Previous month advance',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.notes),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  ElevatedButton.icon(
+                    onPressed: _loading ? null : _save,
+                    icon: const Icon(Icons.check_circle),
+                    label: const Text('Save Opening Adjustment', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFF59E0B),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Persons Page
 // ---------------------------------------------------------------------------
 class PersonsPage extends StatefulWidget {
@@ -1520,7 +1791,7 @@ class _PersonsPageState extends State<PersonsPage> {
 }
 
 // ---------------------------------------------------------------------------
-// Reports Page
+// Reports Page (All 6 Reports Matching Web App Exactly)
 // ---------------------------------------------------------------------------
 class ReportsPage extends StatefulWidget {
   final ApiService api;
@@ -1529,134 +1800,609 @@ class ReportsPage extends StatefulWidget {
   State<ReportsPage> createState() => _ReportsPageState();
 }
 
-class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStateMixin {
-  late TabController _tab;
-  Map<String, dynamic>? _groupData;
+class _ReportsPageState extends State<ReportsPage> {
+  final List<String> _reportTypes = [
+    'Group Summary & Settlement',
+    'Total Expense Report',
+    'Paid by Person Report',
+    'Member Ledger Report',
+    'Detail Ledger Report',
+    'Day-Wise Expense Report',
+  ];
+
+  String _currentType = 'Group Summary & Settlement';
   bool _loading = false;
+  Map<String, dynamic>? _reportData;
+  List<dynamic> _persons = [];
+  int? _selectedPersonId;
+
+  late DateTime _fromDate;
+  late DateTime _toDate;
 
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this);
-    _loadGroup();
+    final now = DateTime.now();
+    _fromDate = DateTime(now.year, now.month, 1);
+    _toDate = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    _loadPersons();
+    _loadReport();
   }
 
-  @override
-  void dispose() { _tab.dispose(); super.dispose(); }
+  Future<void> _loadPersons() async {
+    try {
+      final res = await widget.api.get('/persons');
+      if (res['success'] == true) {
+        setState(() {
+          _persons = res['persons'] ?? [];
+          if (_persons.isNotEmpty && _selectedPersonId == null) {
+            _selectedPersonId = _persons[0]['id'] as int;
+          }
+        });
+      }
+    } catch (_) {}
+  }
 
-  Future<void> _loadGroup() async {
+  Future<void> _loadReport() async {
     setState(() => _loading = true);
     try {
-      final data = await widget.api.get('/reports/group-summary');
-      setState(() { _groupData = data; _loading = false; });
-    } catch (e) { setState(() => _loading = false); }
+      final fromMs = _fromDate.millisecondsSinceEpoch;
+      final toMs = _toDate.millisecondsSinceEpoch;
+
+      if (_currentType == 'Group Summary & Settlement') {
+        final data = await widget.api.get('/reports/group-summary');
+        setState(() { _reportData = data; _loading = false; });
+      } else if (_currentType == 'Total Expense Report') {
+        final data = await widget.api.get('/reports/total-expense?fromMillis=$fromMs&toMillis=$toMs');
+        setState(() { _reportData = data; _loading = false; });
+      } else if (_currentType == 'Paid by Person Report') {
+        final data = await widget.api.get('/reports/paid-by-person?fromMillis=$fromMs&toMillis=$toMs');
+        setState(() { _reportData = data; _loading = false; });
+      } else if (_currentType == 'Member Ledger Report') {
+        if (_selectedPersonId == null && _persons.isNotEmpty) {
+          _selectedPersonId = _persons[0]['id'] as int;
+        }
+        if (_selectedPersonId != null) {
+          final data = await widget.api.get('/reports/person-ledger?personId=$_selectedPersonId');
+          setState(() { _reportData = data; _loading = false; });
+        } else {
+          setState(() => _loading = false);
+        }
+      } else if (_currentType == 'Detail Ledger Report') {
+        if (_selectedPersonId == null && _persons.isNotEmpty) {
+          _selectedPersonId = _persons[0]['id'] as int;
+        }
+        if (_selectedPersonId != null) {
+          final data = await widget.api.get('/reports/person-detail-ledger?personId=$_selectedPersonId');
+          setState(() { _reportData = data; _loading = false; });
+        } else {
+          setState(() => _loading = false);
+        }
+      } else if (_currentType == 'Day-Wise Expense Report') {
+        String url = '/reports/day-wise?fromMillis=$fromMs&toMillis=$toMs';
+        if (_selectedPersonId != null) {
+          url += '&personId=$_selectedPersonId';
+        }
+        final data = await widget.api.get(url);
+        setState(() { _reportData = data; _loading = false; });
+      }
+    } catch (e) {
+      setState(() => _loading = false);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error loading report: $e')));
+    }
+  }
+
+  void _shareWhatsApp(String text, String? mobile) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mobile != null && mobile.isNotEmpty
+            ? 'Report summary copied to clipboard! (Member: $mobile)'
+            : 'Report summary copied to clipboard!'),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Reports'),
-        bottom: TabBar(
-          controller: _tab,
-          tabs: const [Tab(text: 'Group Summary'), Tab(text: 'Settlement')],
-        ),
-        actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: _loadGroup)],
+        title: const Text('Mess Reports'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadReport,
+            tooltip: 'Refresh Report',
+          ),
+        ],
       ),
-      body: TabBarView(
-        controller: _tab,
+      body: Column(
         children: [
-          // Group Summary
-          _loading
-              ? const Center(child: CircularProgressIndicator())
-              : ListView(
-                  padding: const EdgeInsets.all(12),
+          // Selector Card
+          Card(
+            margin: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _currentType,
+                  isExpanded: true,
+                  icon: const Icon(Icons.arrow_drop_down_circle, color: Color(0xFF6366F1)),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87),
+                  items: _reportTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                  onChanged: (v) {
+                    if (v != null) {
+                      setState(() => _currentType = v);
+                      _loadReport();
+                    }
+                  },
+                ),
+              ),
+            ),
+          ),
+
+          // Filters Card (Only for reports that need filters)
+          _buildFilterBar(),
+
+          // Report Content Area
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : RefreshIndicator(
+                    onRefresh: _loadReport,
+                    child: _buildReportContent(),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterBar() {
+    final needsDates = _currentType == 'Total Expense Report' ||
+        _currentType == 'Paid by Person Report' ||
+        _currentType == 'Day-Wise Expense Report';
+    final needsPerson = _currentType == 'Member Ledger Report' ||
+        _currentType == 'Detail Ledger Report' ||
+        _currentType == 'Day-Wise Expense Report';
+
+    if (!needsDates && !needsPerson) return const SizedBox.shrink();
+
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      elevation: 0,
+      color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.4),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          children: [
+            if (needsDates)
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.calendar_today, size: 14),
+                      label: Text('From: ${DateFormat('dd/MM/yy').format(_fromDate)}', style: const TextStyle(fontSize: 12)),
+                      onPressed: () async {
+                        final d = await showDatePicker(context: context, initialDate: _fromDate, firstDate: DateTime(2020), lastDate: DateTime(2035));
+                        if (d != null) {
+                          setState(() => _fromDate = DateTime(d.year, d.month, d.day, 0, 0, 0));
+                          _loadReport();
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.event, size: 14),
+                      label: Text('To: ${DateFormat('dd/MM/yy').format(_toDate)}', style: const TextStyle(fontSize: 12)),
+                      onPressed: () async {
+                        final d = await showDatePicker(context: context, initialDate: _toDate, firstDate: DateTime(2020), lastDate: DateTime(2035));
+                        if (d != null) {
+                          setState(() => _toDate = DateTime(d.year, d.month, d.day, 23, 59, 59));
+                          _loadReport();
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            if (needsDates && needsPerson) const SizedBox(height: 8),
+            if (needsPerson)
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<int?>(
+                      value: _selectedPersonId,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        labelText: 'Select Member',
+                      ),
+                      items: [
+                        if (_currentType == 'Day-Wise Expense Report')
+                          const DropdownMenuItem<int?>(value: null, child: Text('All Members')),
+                        ..._persons.map((p) => DropdownMenuItem<int?>(
+                              value: p['id'] as int,
+                              child: Text(p['name'] as String),
+                            )),
+                      ],
+                      onChanged: (v) {
+                        setState(() => _selectedPersonId = v);
+                        _loadReport();
+                      },
+                    ),
+                  ),
+                  if (_currentType == 'Member Ledger Report' || _currentType == 'Detail Ledger Report') ...[
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366), foregroundColor: Colors.white),
+                      icon: const Icon(Icons.share, size: 16),
+                      label: const Text('WhatsApp', style: TextStyle(fontSize: 12)),
+                      onPressed: () {
+                        if (_reportData == null) return;
+                        final pName = _reportData?['personName'] ?? (_reportData?['balance']?['personName'] ?? 'Member');
+                        final mob = _reportData?['mobileNumber'] ?? (_reportData?['balance']?['mobileNumber'] ?? '');
+                        final exp = _reportData?['yourTotalExpense'] ?? (_reportData?['balance']?['totalShare'] ?? 0);
+                        final paid = _reportData?['totalPaid'] ?? (_reportData?['balance']?['totalPaid'] ?? 0);
+                        final rem = double.tryParse((_reportData?['remainingBalance'] ?? (_reportData?['balance']?['remainingBalance'] ?? 0)).toString()) ?? 0;
+                        final isRec = rem >= 0;
+
+                        final msg = "*Chaudry Mess System - Ledger Report*\n"
+                            "Member: *$pName*\n"
+                            "-----------------------------------\n"
+                            "Total Expense: ${formatCurrency(exp)}\n"
+                            "Total Paid: ${formatCurrency(paid)}\n"
+                            "*${isRec ? 'Receivable Amount' : 'Payable Amount'}:* ${formatCurrency(rem.abs())}\n"
+                            "-----------------------------------\n"
+                            "Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}";
+
+                        _shareWhatsApp(msg, mob?.toString());
+                      },
+                    ),
+                  ],
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReportContent() {
+    if (_reportData == null) {
+      return const Center(child: Text('No report data found'));
+    }
+
+    switch (_currentType) {
+      case 'Total Expense Report':
+        return _buildTotalExpenseView();
+      case 'Paid by Person Report':
+        return _buildPaidByPersonView();
+      case 'Member Ledger Report':
+        return _buildMemberLedgerView();
+      case 'Detail Ledger Report':
+        return _buildDetailLedgerView();
+      case 'Day-Wise Expense Report':
+        return _buildDayWiseView();
+      case 'Group Summary & Settlement':
+      default:
+        return _buildGroupSummaryView();
+    }
+  }
+
+  // 1. Group Summary & Settlement
+  Widget _buildGroupSummaryView() {
+    final balances = _reportData?['balances'] as List? ?? [];
+    final settlements = _reportData?['settlements'] as List? ?? [];
+
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        Card(
+          color: Theme.of(context).colorScheme.primaryContainer,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _InfoCol('Total Expense', formatCurrency(_reportData?['totalExpense'] ?? 0)),
+                _InfoCol('Total Paid', formatCurrency(_reportData?['totalPaid'] ?? 0)),
+                _InfoCol('Members', '${_reportData?['totalMembers'] ?? 0}'),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        const Text('Member Balances', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        ...balances.map((b) {
+          final bal = double.tryParse(b['remainingBalance'].toString()) ?? 0;
+          final pos = bal >= 0;
+          return Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: pos ? Colors.green.withOpacity(0.15) : Colors.red.withOpacity(0.15),
+                child: Text((b['personName'] as String)[0].toUpperCase(), style: TextStyle(color: pos ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
+              ),
+              title: Text(b['personName'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text('Paid: ${formatCurrency(b['totalPaid'])} • Share: ${formatCurrency(b['totalShare'])}', style: const TextStyle(fontSize: 12)),
+              trailing: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: pos ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  pos ? '▲ ${formatCurrency(bal)}' : '▼ ${formatCurrency(bal.abs())}',
+                  style: TextStyle(color: pos ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              ),
+            ),
+          );
+        }),
+        const SizedBox(height: 14),
+        const Text('Settlement (Minimum Transactions)', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        if (settlements.isEmpty)
+          const Card(child: Padding(padding: EdgeInsets.all(16), child: Center(child: Text('Everyone is settled up!'))))
+        else
+          ...settlements.map((s) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  leading: const CircleAvatar(backgroundColor: Colors.orange, child: Icon(Icons.arrow_forward, color: Colors.white)),
+                  title: RichText(
+                    text: TextSpan(
+                      style: DefaultTextStyle.of(context).style,
+                      children: [
+                        TextSpan(text: s['fromName'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                        const TextSpan(text: ' pays '),
+                        TextSpan(text: s['toName'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                      ],
+                    ),
+                  ),
+                  trailing: Text(formatCurrency(s['amount']), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                ),
+              )),
+      ],
+    );
+  }
+
+  // 2. Total Expense Report
+  Widget _buildTotalExpenseView() {
+    final expenses = _reportData?['expenses'] as List? ?? [];
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        Card(
+          color: const Color(0xFF6366F1).withOpacity(0.1),
+          elevation: 0,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _InfoCol('Transactions', '${_reportData?['totalTransactions'] ?? 0}'),
+                _InfoCol('Total Expense', formatCurrency(_reportData?['totalExpense'] ?? 0)),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        ...expenses.map((e) => Card(
+              margin: const EdgeInsets.only(bottom: 6),
+              child: ListTile(
+                title: Text(e['description'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text('${formatDate(e['date'])} • Paid by: ${e['paidByName'] ?? '-'}'),
+                trailing: Text(formatCurrency(e['amount']), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.indigo)),
+              ),
+            )),
+      ],
+    );
+  }
+
+  // 3. Paid by Person Report
+  Widget _buildPaidByPersonView() {
+    final totals = _reportData?['totals'] as List? ?? [];
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        Card(
+          color: const Color(0xFF10B981).withOpacity(0.1),
+          elevation: 0,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _InfoCol('Members', '${_reportData?['totalMembers'] ?? 0}'),
+                _InfoCol('Grand Total Paid', formatCurrency(_reportData?['grandTotal'] ?? 0)),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        ...totals.map((t) => Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: CircleAvatar(child: Text((t['personName'] as String)[0].toUpperCase())),
+                title: Text(t['personName'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+                trailing: Text(formatCurrency(t['totalPaid']), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF10B981))),
+              ),
+            )),
+      ],
+    );
+  }
+
+  // 4. Member Ledger Report
+  Widget _buildMemberLedgerView() {
+    final b = _reportData?['balance'];
+    if (b == null) return const Center(child: Text('No ledger data found for this member'));
+
+    final rem = double.tryParse(b['remainingBalance'].toString()) ?? 0;
+    final isPos = rem >= 0;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text(b['personName'] ?? '', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        Text(b['mobileNumber']?.toString().isNotEmpty == true ? 'Mobile: ${b['mobileNumber']}' : 'No mobile registered', style: const TextStyle(color: Colors.grey)),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(child: Card(child: Padding(padding: const EdgeInsets.all(14), child: _InfoCol('Total Paid', formatCurrency(b['totalPaid']))))),
+            const SizedBox(width: 10),
+            Expanded(child: Card(child: Padding(padding: const EdgeInsets.all(14), child: _InfoCol('Total Allocated', formatCurrency(b['totalShare']))))),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Card(
+          color: isPos ? Colors.green.withOpacity(0.12) : Colors.red.withOpacity(0.12),
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: isPos ? Colors.green : Colors.red, width: 1.5)),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                Text(
+                  isPos ? '▲ AMOUNT RECEIVABLE' : '▼ AMOUNT PAYABLE',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isPos ? Colors.green[800] : Colors.red[800]),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  formatCurrency(rem.abs()),
+                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: isPos ? Colors.green[900] : Colors.red[900]),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 5. Detail Ledger Report
+  Widget _buildDetailLedgerView() {
+    final rows = _reportData?['rows'] as List? ?? [];
+    final rem = double.tryParse((_reportData?['remainingBalance'] ?? 0).toString()) ?? 0;
+    final isPos = rem >= 0;
+
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        Row(
+          children: [
+            Expanded(child: Card(child: Padding(padding: const EdgeInsets.all(12), child: _InfoCol('Entries', '${_reportData?['totalEntries'] ?? 0}')))),
+            const SizedBox(width: 8),
+            Expanded(child: Card(child: Padding(padding: const EdgeInsets.all(12), child: _InfoCol('Your Expense', formatCurrency(_reportData?['yourTotalExpense'] ?? 0))))),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ...rows.map((r) => Card(
+              margin: const EdgeInsets.only(bottom: 6),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
                   children: [
-                    Card(
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            _InfoCol('Total Expense', formatCurrency(_groupData?['totalExpense'] ?? 0)),
-                            _InfoCol('Total Paid', formatCurrency(_groupData?['totalPaid'] ?? 0)),
-                            _InfoCol('Members', '${(_groupData?['totalMembers'] ?? 0)}'),
-                          ],
-                        ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(r['description'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Text('${formatDate(r['date'])} • Total: ${formatCurrency(r['totalAmount'])} ÷ ${r['dividedByCount']}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    ...(_groupData?['balances'] as List? ?? []).map((b) {
-                      final bal = double.tryParse(b['remainingBalance'].toString()) ?? 0;
-                      final pos = bal >= 0;
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
+                    Text(formatCurrency(r['yourShare']), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF10B981))),
+                  ],
+                ),
+              ),
+            )),
+        const Divider(height: 24),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text('Total Expense: ${formatCurrency(_reportData?['yourTotalExpense'] ?? 0)}', style: const TextStyle(fontSize: 13)),
+              Text('Total Paid: ${formatCurrency(_reportData?['totalPaid'] ?? 0)}', style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 4),
+              Text(
+                '${isPos ? "Receivable" : "Payable"}: ${formatCurrency(rem.abs())}',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: isPos ? Colors.green : Colors.red),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 6. Day-Wise Expense Report
+  Widget _buildDayWiseView() {
+    final groups = _reportData?['groups'] as List? ?? [];
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        Card(
+          color: const Color(0xFF6366F1).withOpacity(0.1),
+          elevation: 0,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _InfoCol('Days With Data', '${_reportData?['daysWithData'] ?? 0}'),
+                _InfoCol('Grand Total', formatCurrency(_reportData?['grandTotal'] ?? 0)),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (groups.isEmpty)
+          const Padding(padding: EdgeInsets.all(20), child: Center(child: Text('No tagged expenses found in date range.')))
+        else
+          ...groups.map((g) {
+            final categories = g['categories'] as List? ?? [];
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(formatDate(g['dateMillis']), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        Text('Day Total: ${formatCurrency(g['dayTotal'])}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF6366F1))),
+                      ],
+                    ),
+                    const Divider(height: 16),
+                    ...categories.map((c) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Row(
-                                children: [
-                                  CircleAvatar(child: Text((b['personName'] as String)[0].toUpperCase())),
-                                  const SizedBox(width: 12),
-                                  Expanded(child: Text(b['personName'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold))),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: pos ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      pos ? '▲ ${formatCurrency(bal)}' : '▼ ${formatCurrency(bal.abs())}',
-                                      style: TextStyle(color: pos ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 13),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text('Paid: ${formatCurrency(b['totalPaid'])}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                                  Text('Share: ${formatCurrency(b['totalShare'])}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                                ],
+                              Text(c['category'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
+                              Text(
+                                '${formatCurrency(c['totalAmount'])} ÷ ${c['effectivePersons']} = ${formatCurrency(c['calculatedShare'])}',
+                                style: const TextStyle(fontSize: 12, color: Color(0xFF10B981)),
                               ),
                             ],
                           ),
-                        ),
-                      );
-                    }),
+                        )),
                   ],
                 ),
-
-          // Settlement
-          _loading
-              ? const Center(child: CircularProgressIndicator())
-              : (_groupData?['settlements'] as List? ?? []).isEmpty
-                  ? const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.check_circle, color: Colors.green, size: 60), SizedBox(height: 12), Text('All Settled! No pending payments.', style: TextStyle(fontSize: 16))]))
-                  : ListView(
-                      padding: const EdgeInsets.all(12),
-                      children: (_groupData?['settlements'] as List? ?? []).map((s) => Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: ListTile(
-                          leading: const CircleAvatar(backgroundColor: Colors.orange, child: Icon(Icons.arrow_forward, color: Colors.white)),
-                          title: RichText(
-                            text: TextSpan(
-                              style: DefaultTextStyle.of(context).style,
-                              children: [
-                                TextSpan(text: s['fromName'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-                                const TextSpan(text: ' pays '),
-                                TextSpan(text: s['toName'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
-                              ],
-                            ),
-                          ),
-                          trailing: Text(formatCurrency(s['amount']), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                        ),
-                      )).toList(),
-                    ),
-        ],
-      ),
+              ),
+            );
+          }),
+      ],
     );
   }
 }
