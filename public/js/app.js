@@ -2587,6 +2587,15 @@ async function saveOpeningAdjustment(e) {
 // -----------------------------------------------------------------------------
 // Batch Management
 // -----------------------------------------------------------------------------
+// Helper to display friendly batch dates (e.g. 08 Oct 2026)
+function formatBatchDisplayDate(val) {
+  if (!val) return '';
+  const num = Number(val);
+  const d = !isNaN(num) && num > 100000 ? new Date(num) : new Date(val);
+  if (isNaN(d.getTime())) return String(val);
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 async function loadActiveBatch() {
   try {
     const res = await fetch('/api/batches/active');
@@ -2596,7 +2605,10 @@ async function loadActiveBatch() {
     if (data.success && data.batch) {
       state.activeBatch = data.batch;
       if (batchPill) {
-        batchPill.innerHTML = `📅 <strong>${data.batch.name}</strong> <span style="font-size: 10px; opacity: 0.85; margin-left: 2px;">(${data.batch.fromDate} to ${data.batch.toDate})</span>`;
+        const fromStr = formatBatchDisplayDate(data.batch.fromDate);
+        const toStr = formatBatchDisplayDate(data.batch.toDate);
+        const dateRangeText = (fromStr && toStr) ? ` <span style="font-size: 10px; opacity: 0.85; margin-left: 2px;">(${fromStr} to ${toStr})</span>` : '';
+        batchPill.innerHTML = `📅 <strong>${data.batch.name}</strong>${dateRangeText}`;
         batchPill.title = `Current active batch: ${data.batch.name}. Click to manage.`;
       }
     } else {
@@ -2664,13 +2676,16 @@ async function loadBatchesTable() {
         ? `<button class="btn btn-secondary btn-sm" onclick="toggleBatchStatus(${b.id}, 'closed')">Close Batch</button>`
         : `<button class="btn btn-primary btn-sm" onclick="toggleBatchStatus(${b.id}, 'active')">Set Active</button>`;
 
+      const displayFrom = formatBatchDisplayDate(b.fromDate);
+      const displayTo = formatBatchDisplayDate(b.toDate);
+
       return `
         <tr>
           <td><strong>${b.name}</strong></td>
-          <td>${b.fromDate}</td>
-          <td>${b.toDate}</td>
+          <td>${displayFrom}</td>
+          <td>${displayTo}</td>
           <td>${statusBadge}</td>
-          <td style="text-align: right;">${b.entryCount || 0}</td>
+          <td style="text-align: right;">${b.totalEntries || b.entryCount || 0}</td>
           <td style="text-align: right; font-weight: 700;">${formatCurrency(b.totalExpense || 0)}</td>
           <td style="text-align: center; white-space: nowrap;">
             <button class="btn btn-secondary btn-sm" onclick='editBatch(${JSON.stringify(b).replace(/'/g, "&#39;")})'>Edit</button>
@@ -2687,8 +2702,8 @@ async function loadBatchesTable() {
 function editBatch(batch) {
   document.getElementById('batch-edit-id').value = batch.id;
   document.getElementById('batch-input-name').value = batch.name;
-  document.getElementById('batch-input-from').value = batch.fromDate;
-  document.getElementById('batch-input-to').value = batch.toDate;
+  document.getElementById('batch-input-from').value = toInputDate(batch.fromDate);
+  document.getElementById('batch-input-to').value = toInputDate(batch.toDate);
   document.getElementById('batch-input-status').value = batch.status || 'active';
   const title = document.getElementById('batch-form-title');
   if (title) title.textContent = `✏️ Edit Batch #${batch.id}`;

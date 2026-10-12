@@ -394,7 +394,7 @@ router.get('/dashboard', async (req, res) => {
     // Get active batch info
     const bRes = await pool.request().query("SELECT TOP 1 id, name, fromDate, toDate, status FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
     if (bRes.recordset.length > 0) {
-      activeBatch = bRes.recordset[0];
+      activeBatch = formatBatchDates(bRes.recordset[0]);
       if (!targetBatchId) targetBatchId = activeBatch.id;
     }
 
@@ -868,6 +868,36 @@ router.post('/opening-adjustments', async (req, res) => {
   }
 });
 
+// Helper to format batch dates as YYYY-MM-DD
+function formatBatchDates(batch) {
+  if (!batch) return null;
+  const toDateStr = (val) => {
+    if (!val) return '';
+    const num = Number(val);
+    const d = !isNaN(num) && num > 100000 ? new Date(num) : new Date(val);
+    if (isNaN(d.getTime())) return String(val);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  return {
+    ...batch,
+    fromDate: toDateStr(batch.fromDate),
+    toDate: toDateStr(batch.toDate)
+  };
+}
+
+function parseDateInputToMillis(inputVal) {
+  if (!inputVal) return Date.now();
+  if (typeof inputVal === 'number') return inputVal;
+  const str = String(inputVal).trim();
+  const num = Number(str);
+  if (!isNaN(num) && num > 100000) return num;
+  const parsed = new Date(str).getTime();
+  return isNaN(parsed) ? Date.now() : parsed;
+}
+
 // -----------------------------------------------------------------------------
 // Batches Management
 // -----------------------------------------------------------------------------
@@ -886,7 +916,8 @@ router.get('/batches', async (req, res) => {
       ORDER BY b.fromDate DESC, b.id DESC
     `;
     const result = await pool.request().query(query);
-    res.json({ success: true, batches: result.recordset });
+    const formattedBatches = (result.recordset || []).map(formatBatchDates);
+    res.json({ success: true, batches: formattedBatches });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -897,7 +928,7 @@ router.get('/batches/active', async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query("SELECT TOP 1 id, name, fromDate, toDate, status, createdAt FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
-    const activeBatch = result.recordset[0] || null;
+    const activeBatch = result.recordset[0] ? formatBatchDates(result.recordset[0]) : null;
     res.json({ success: true, batch: activeBatch });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -913,8 +944,8 @@ router.post('/batches', async (req, res) => {
     }
     const pool = await getPool();
     const batchStatus = (status || 'active').toLowerCase() === 'active' ? 'active' : 'closed';
-    const fromMillis = fromDate ? parseInt(fromDate, 10) : Date.now();
-    const toMillis = toDate ? parseInt(toDate, 10) : Date.now();
+    const fromMillis = parseDateInputToMillis(fromDate);
+    const toMillis = parseDateInputToMillis(toDate);
 
     if (batchStatus === 'active') {
       await pool.request().query("UPDATE dbo.Batches SET status = 'closed' WHERE status = 'active'");
@@ -947,8 +978,8 @@ router.put('/batches/:id', async (req, res) => {
     const pool = await getPool();
 
     const batchStatus = (status || 'active').toLowerCase() === 'active' ? 'active' : 'closed';
-    const fromMillis = fromDate ? parseInt(fromDate, 10) : Date.now();
-    const toMillis = toDate ? parseInt(toDate, 10) : Date.now();
+    const fromMillis = parseDateInputToMillis(fromDate);
+    const toMillis = parseDateInputToMillis(toDate);
 
     if (batchStatus === 'active') {
       await pool.request().input('id', sql.BigInt, id).query("UPDATE dbo.Batches SET status = 'closed' WHERE id <> @id AND status = 'active'");
