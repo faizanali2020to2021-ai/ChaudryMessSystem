@@ -2605,8 +2605,10 @@ async function loadActiveBatch() {
     if (data.success && data.batch) {
       state.activeBatch = data.batch;
       if (batchPill) {
-        const fromStr = formatBatchDisplayDate(data.batch.fromDate);
-        const toStr = formatBatchDisplayDate(data.batch.toDate);
+        const rawFrom = data.batch.fromDate ?? data.batch.FROMDate ?? data.batch.fromdate;
+        const rawTo = data.batch.toDate ?? data.batch.TODate ?? data.batch.todate;
+        const fromStr = formatBatchDisplayDate(rawFrom);
+        const toStr = formatBatchDisplayDate(rawTo);
         const dateRangeText = (fromStr && toStr) ? ` <span style="font-size: 10px; opacity: 0.85; margin-left: 2px;">(${fromStr} to ${toStr})</span>` : '';
         batchPill.innerHTML = `📅 <strong>${data.batch.name}</strong>${dateRangeText}`;
         batchPill.title = `Current active batch: ${data.batch.name}. Click to manage.`;
@@ -2676,8 +2678,10 @@ async function loadBatchesTable() {
         ? `<button class="btn btn-secondary btn-sm" onclick="toggleBatchStatus(${b.id}, 'closed')">Close Batch</button>`
         : `<button class="btn btn-primary btn-sm" onclick="toggleBatchStatus(${b.id}, 'active')">Set Active</button>`;
 
-      const displayFrom = formatBatchDisplayDate(b.fromDate);
-      const displayTo = formatBatchDisplayDate(b.toDate);
+      const rawFrom = b.fromDate ?? b.FROMDate ?? b.fromdate;
+      const rawTo = b.toDate ?? b.TODate ?? b.todate;
+      const displayFrom = formatBatchDisplayDate(rawFrom);
+      const displayTo = formatBatchDisplayDate(rawTo);
 
       return `
         <tr>
@@ -2700,10 +2704,12 @@ async function loadBatchesTable() {
 }
 
 function editBatch(batch) {
+  const rawFrom = batch.fromDate ?? batch.FROMDate ?? batch.fromdate;
+  const rawTo = batch.toDate ?? batch.TODate ?? batch.todate;
   document.getElementById('batch-edit-id').value = batch.id;
   document.getElementById('batch-input-name').value = batch.name;
-  document.getElementById('batch-input-from').value = toInputDate(batch.fromDate);
-  document.getElementById('batch-input-to').value = toInputDate(batch.toDate);
+  document.getElementById('batch-input-from').value = toInputDate(rawFrom);
+  document.getElementById('batch-input-to').value = toInputDate(rawTo);
   document.getElementById('batch-input-status').value = batch.status || 'active';
   const title = document.getElementById('batch-form-title');
   if (title) title.textContent = `✏️ Edit Batch #${batch.id}`;

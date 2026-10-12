@@ -881,10 +881,14 @@ function formatBatchDates(batch) {
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   };
+
+  const fromVal = batch.fromDate ?? batch.FROMDate ?? batch.fromdate ?? null;
+  const toVal = batch.toDate ?? batch.TODate ?? batch.todate ?? null;
+
   return {
     ...batch,
-    fromDate: toDateStr(batch.fromDate),
-    toDate: toDateStr(batch.toDate)
+    fromDate: toDateStr(fromVal),
+    toDate: toDateStr(toVal)
   };
 }
 
