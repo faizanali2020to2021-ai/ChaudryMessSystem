@@ -182,6 +182,10 @@
           <div class="filters-bar">
             <input type="text" id="expense-search" class="form-control" placeholder="Search description or person..." style="flex: 1; min-width: 200px;" oninput="debounceFilterExpenses()">
             
+            <select id="expense-filter-batch" class="form-control" onchange="loadExpenses()" style="max-width: 190px;">
+              <option value="">All Batches</option>
+            </select>
+
             <select id="expense-filter-person" class="form-control" onchange="loadExpenses()">
               <option value="">All Persons</option>
             </select>

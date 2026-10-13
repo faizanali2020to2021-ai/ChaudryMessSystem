@@ -366,7 +366,9 @@ function switchView(viewName) {
 
   // Trigger loads
   if (viewName === 'dashboard') loadDashboard();
-  if (viewName === 'expenses') loadExpenses();
+  if (viewName === 'expenses') {
+    populateBatchFilter().then(() => loadExpenses());
+  }
   if (viewName === 'persons') loadPersonsTable();
   if (viewName === 'reports') generateActiveReport();
   if (viewName === 'settings') loadDatabaseStatus();
@@ -513,6 +515,34 @@ function populatePersonSelects() {
   }
 }
 
+async function populateBatchFilter() {
+  const batchSelect = document.getElementById('expense-filter-batch');
+  if (!batchSelect) return;
+
+  try {
+    const res = await fetch('/api/batches');
+    const data = await res.json();
+    if (!data.success) return;
+
+    const currentVal = batchSelect.value;
+    const batches = data.batches || [];
+
+    batchSelect.innerHTML = '<option value="">All Batches (تمام بیچز)</option>' +
+      batches.map(b => {
+        const active = b.status === 'active' ? ' ✅' : ' 🔒';
+        return `<option value="${b.id}">${b.name}${active}</option>`;
+      }).join('');
+
+    // Restore selection if still exists, else default to active batch
+    if (currentVal && batches.find(b => String(b.id) === currentVal)) {
+      batchSelect.value = currentVal;
+    } else if (state.activeBatch && state.activeBatch.id) {
+      batchSelect.value = String(state.activeBatch.id);
+    }
+  } catch (err) {
+    console.warn('Failed to populate batch filter:', err);
+  }
+}
 
 async function loadPersonsTable() {
   await loadPersons();
@@ -753,11 +783,13 @@ function debounceFilterExpenses() {
 async function loadExpenses() {
   const search = document.getElementById('expense-search').value.trim();
   const personId = document.getElementById('expense-filter-person').value;
+  const batchId = document.getElementById('expense-filter-batch')?.value || '';
   const sortBy = document.getElementById('expense-sort-by').value;
 
   const params = new URLSearchParams();
   if (search) params.append('searchQuery', search);
   if (personId) params.append('personId', personId);
+  if (batchId) params.append('batchId', batchId);
   if (sortBy) params.append('sortBy', sortBy);
 
   try {
@@ -2780,6 +2812,7 @@ async function saveBatch(e) {
       resetBatchForm();
       await loadBatchesTable();
       await loadActiveBatch();
+      await populateBatchFilter();
       if (state.activeView === 'dashboard') loadDashboard();
       if (state.activeView === 'expenses') loadExpenses();
       alert('Batch saved successfully!');
@@ -2807,6 +2840,7 @@ async function toggleBatchStatus(id, newStatus) {
     if (data.success) {
       await loadBatchesTable();
       await loadActiveBatch();
+      await populateBatchFilter();
       if (state.activeView === 'dashboard') loadDashboard();
       if (state.activeView === 'expenses') loadExpenses();
     } else {
@@ -3049,6 +3083,7 @@ async function submitCloseAndTransfer() {
       closeBatchesModal();
       await loadActiveBatch();
       await loadBatchesTable();
+      await populateBatchFilter();
       if (state.activeView === 'dashboard') loadDashboard();
       if (state.activeView === 'expenses') loadExpenses();
     } else {
