@@ -2407,6 +2407,12 @@ function executeAICommand(rawCommand) {
   }
 
   // 4. BATCHES MANAGEMENT COMMANDS
+  if (cmd.includes('transfer batch') || cmd.includes('close batch') || cmd.includes('بیچ ٹرانسفر') || cmd.includes('بیچ بند')) {
+    triggerCloseTransferCurrent();
+    showAIFeedback('🔄 Batch Close & Transfer opened!');
+    setTimeout(() => closeAIAssistant(), 1200);
+    return;
+  }
   if (cmd.includes('batch') || cmd.includes('بیچ')) {
     openBatchesModal();
     showAIFeedback('📅 Batches Management opened!');
@@ -2601,23 +2607,38 @@ async function loadActiveBatch() {
     const res = await fetch('/api/batches/active');
     const data = await res.json();
     const batchPill = document.getElementById('active-batch-pill');
+    const bannerCard = document.getElementById('active-batch-banner-card');
+    const bannerName = document.getElementById('active-batch-banner-name');
+    const bannerDates = document.getElementById('active-batch-banner-dates');
 
     if (data.success && data.batch) {
       state.activeBatch = data.batch;
+      const rawFrom = data.batch.fromDate ?? data.batch.FROMDate ?? data.batch.fromdate;
+      const rawTo = data.batch.toDate ?? data.batch.TODate ?? data.batch.todate;
+      const fromStr = formatBatchDisplayDate(rawFrom);
+      const toStr = formatBatchDisplayDate(rawTo);
+      const dateRangeText = (fromStr && toStr) ? ` <span style="font-size: 10px; opacity: 0.85; margin-left: 2px;">(${fromStr} to ${toStr})</span>` : '';
+
       if (batchPill) {
-        const rawFrom = data.batch.fromDate ?? data.batch.FROMDate ?? data.batch.fromdate;
-        const rawTo = data.batch.toDate ?? data.batch.TODate ?? data.batch.todate;
-        const fromStr = formatBatchDisplayDate(rawFrom);
-        const toStr = formatBatchDisplayDate(rawTo);
-        const dateRangeText = (fromStr && toStr) ? ` <span style="font-size: 10px; opacity: 0.85; margin-left: 2px;">(${fromStr} to ${toStr})</span>` : '';
         batchPill.innerHTML = `📅 <strong>${data.batch.name}</strong>${dateRangeText}`;
         batchPill.title = `Current active batch: ${data.batch.name}. Click to manage.`;
+      }
+
+      if (bannerCard && bannerName) {
+        bannerCard.style.display = 'flex';
+        bannerName.textContent = data.batch.name;
+        if (bannerDates) {
+          bannerDates.textContent = (fromStr && toStr) ? `Batch Period: ${fromStr} to ${toStr}` : '';
+        }
       }
     } else {
       state.activeBatch = null;
       if (batchPill) {
         batchPill.innerHTML = `📅 <strong>No Active Batch</strong>`;
         batchPill.title = 'No active batch set. Click to create or activate a batch.';
+      }
+      if (bannerCard) {
+        bannerCard.style.display = 'none';
       }
     }
   } catch (err) {
@@ -2674,9 +2695,16 @@ async function loadBatchesTable() {
         ? '<span class="badge badge-green">Active (Current)</span>'
         : '<span class="badge" style="background:#e2e8f0; color:#475569;">Closed</span>';
       
-      const toggleBtn = isActive
-        ? `<button class="btn btn-secondary btn-sm" onclick="toggleBatchStatus(${b.id}, 'closed')">Close Batch</button>`
-        : `<button class="btn btn-primary btn-sm" onclick="toggleBatchStatus(${b.id}, 'active')">Set Active</button>`;
+      const actionButtons = isActive
+        ? `
+            <button class="btn btn-sm" onclick="openCloseTransferModal(${b.id})" style="background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 4px; margin-right: 4px;" title="Close this batch and transfer balances to next batch">🔄 Close & Transfer</button>
+            <button class="btn btn-secondary btn-sm" onclick='editBatch(${JSON.stringify(b).replace(/'/g, "&#39;")})' style="font-size: 11px; padding: 4px 8px;">Edit</button>
+            <button class="btn btn-secondary btn-sm" onclick="toggleBatchStatus(${b.id}, 'closed')" style="font-size: 11px; padding: 4px 8px;">Close Only</button>
+          `
+        : `
+            <button class="btn btn-secondary btn-sm" onclick='editBatch(${JSON.stringify(b).replace(/'/g, "&#39;")})' style="font-size: 11px; padding: 4px 8px;">Edit</button>
+            <button class="btn btn-primary btn-sm" onclick="toggleBatchStatus(${b.id}, 'active')" style="font-size: 11px; padding: 4px 8px;">Set Active</button>
+          `;
 
       const rawFrom = b.fromDate ?? b.FROMDate ?? b.fromdate;
       const rawTo = b.toDate ?? b.TODate ?? b.todate;
@@ -2685,15 +2713,14 @@ async function loadBatchesTable() {
 
       return `
         <tr>
-          <td><strong>${b.name}</strong></td>
+          <td><strong>${escapeHtml(b.name)}</strong></td>
           <td>${displayFrom}</td>
           <td>${displayTo}</td>
           <td>${statusBadge}</td>
           <td style="text-align: right;">${b.totalEntries || b.entryCount || 0}</td>
           <td style="text-align: right; font-weight: 700;">${formatCurrency(b.totalExpense || 0)}</td>
           <td style="text-align: center; white-space: nowrap;">
-            <button class="btn btn-secondary btn-sm" onclick='editBatch(${JSON.stringify(b).replace(/'/g, "&#39;")})'>Edit</button>
-            ${toggleBtn}
+            ${actionButtons}
           </td>
         </tr>
       `;
@@ -2788,5 +2815,253 @@ async function toggleBatchStatus(id, newStatus) {
     alert('Failed to change batch status: ' + err.message);
   }
 }
+
+// -----------------------------------------------------------------------------
+// BATCH CLOSING & AUTOMATIC BALANCE TRANSFER
+// -----------------------------------------------------------------------------
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function triggerCloseTransferCurrent() {
+  if (state.activeBatch && state.activeBatch.id) {
+    openCloseTransferModal(state.activeBatch.id);
+  } else {
+    alert('No active batch currently set to close.');
+  }
+}
+
+async function openCloseTransferModal(batchId) {
+  const modal = document.getElementById('close-transfer-modal');
+  if (!modal) return;
+
+  document.getElementById('ct-batch-id').value = batchId;
+  modal.style.display = 'flex';
+
+  const loadingEl = document.getElementById('ct-loading');
+  const contentEl = document.getElementById('ct-content-area');
+  const confirmBtn = document.getElementById('ct-confirm-btn');
+
+  if (loadingEl) loadingEl.style.display = 'block';
+  if (contentEl) contentEl.style.display = 'none';
+  if (confirmBtn) confirmBtn.disabled = true;
+
+  try {
+    const res = await fetch(`/api/batches/${batchId}/closing-preview`);
+    const data = await res.json();
+
+    if (!data.success) {
+      alert('Failed to load batch preview: ' + data.message);
+      closeCloseTransferModal();
+      return;
+    }
+
+    // 1. Header info
+    document.getElementById('ct-old-batch-name').textContent = data.batch.name;
+    const fromStr = formatBatchDisplayDate(data.batch.fromDate);
+    const toStr = formatBatchDisplayDate(data.batch.toDate);
+    document.getElementById('ct-old-batch-dates').textContent = (fromStr && toStr) ? `Period: ${fromStr} to ${toStr}` : '';
+    document.getElementById('ct-total-transferred-stat').textContent = formatCurrency(data.totalTransferredAmount || 0);
+    document.getElementById('ct-members-stat').textContent = `${data.totalCreditors || 0} Creditors · ${data.totalDebtors || 0} Debtors`;
+
+    // 2. Member Balances Preview Table
+    const balTbody = document.getElementById('ct-balances-tbody');
+    if (balTbody) {
+      const balances = data.personBalances || [];
+      if (balances.length === 0) {
+        balTbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:14px; color:var(--text-muted);">No members recorded in this batch.</td></tr>';
+      } else {
+        balTbody.innerHTML = balances.map(p => {
+          const bal = p.remainingBalance || 0;
+          let statusBadge = '<span class="badge" style="background:#e2e8f0; color:#475569;">Settled (0.00)</span>';
+          let balColor = 'var(--text-main)';
+          let balPrefix = '';
+
+          if (bal > 0.01) {
+            statusBadge = '<span class="badge badge-green">Advance / Creditor (+ Credit)</span>';
+            balColor = '#059669';
+            balPrefix = '+';
+          } else if (bal < -0.01) {
+            statusBadge = '<span class="badge badge-red">Payable / Debtor (- Due)</span>';
+            balColor = '#dc2626';
+          }
+
+          return `
+            <tr>
+              <td><strong>${escapeHtml(p.personName)}</strong></td>
+              <td style="text-align: right;">${formatCurrency(p.totalPaid || 0)}</td>
+              <td style="text-align: right;">${formatCurrency(p.totalShare || 0)}</td>
+              <td style="text-align: right; font-weight: 700; color: ${balColor};">${balPrefix}${formatCurrency(bal)}</td>
+              <td style="text-align: center;">${statusBadge}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+    }
+
+    // 3. Opening Adjustment Entries Table
+    const settTbody = document.getElementById('ct-settlements-tbody');
+    if (settTbody) {
+      const settlements = data.settlements || [];
+      if (settlements.length === 0) {
+        settTbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:14px; color:var(--text-muted);">All member balances are zero. No adjustment entries needed.</td></tr>';
+      } else {
+        settTbody.innerHTML = settlements.map((s, idx) => `
+          <tr>
+            <td><strong>#${idx + 1}</strong></td>
+            <td><strong style="color: #059669;">${escapeHtml(s.creditorName)}</strong> <span style="font-size: 10px; color: var(--text-muted);">(Payer)</span></td>
+            <td><strong style="color: #dc2626;">${escapeHtml(s.debtorName)}</strong> <span style="font-size: 10px; color: var(--text-muted);">(Share)</span></td>
+            <td style="text-align: right; font-weight: 700; color: #10b981;">${formatCurrency(s.amount)}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">Auto Opening Balance B/F from ${escapeHtml(data.batch.name)}</td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    // 4. Next Batch Suggestion
+    const sug = data.suggestedNextBatch || {};
+    const nameInput = document.getElementById('ct-new-batch-name');
+    const fromInput = document.getElementById('ct-new-batch-from');
+    const toInput = document.getElementById('ct-new-batch-to');
+    if (nameInput) nameInput.value = sug.name || '';
+    if (fromInput) fromInput.value = sug.fromDate || '';
+    if (toInput) toInput.value = sug.toDate || '';
+
+    // 5. Existing batches dropdown
+    const existSelect = document.getElementById('ct-existing-batch-select');
+    if (existSelect) {
+      const others = data.otherBatches || [];
+      if (others.length === 0) {
+        existSelect.innerHTML = '<option value="">(No other batches available)</option>';
+      } else {
+        existSelect.innerHTML = others.map(ob => `<option value="${ob.id}">${escapeHtml(ob.name)} (${ob.status})</option>`).join('');
+      }
+    }
+
+    // Reset radio button to "new"
+    const newRadio = document.querySelector('input[name="ct-target-mode"][value="new"]');
+    if (newRadio) newRadio.checked = true;
+    handleTargetBatchModeChange();
+
+    // Reset checkbox
+    const tfCheck = document.getElementById('ct-transfer-checkbox');
+    if (tfCheck) tfCheck.checked = true;
+    toggleTransferOptions();
+
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (contentEl) contentEl.style.display = 'block';
+    if (confirmBtn) confirmBtn.disabled = false;
+  } catch (err) {
+    if (loadingEl) loadingEl.style.display = 'none';
+    alert('Error loading closing preview: ' + err.message);
+    closeCloseTransferModal();
+  }
+}
+
+function closeCloseTransferModal() {
+  const modal = document.getElementById('close-transfer-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function handleTargetBatchModeChange() {
+  const mode = document.querySelector('input[name="ct-target-mode"]:checked')?.value || 'new';
+  const newFields = document.getElementById('ct-new-batch-fields');
+  const existFields = document.getElementById('ct-existing-batch-fields');
+  if (mode === 'new') {
+    if (newFields) newFields.style.display = 'grid';
+    if (existFields) existFields.style.display = 'none';
+  } else {
+    if (newFields) newFields.style.display = 'none';
+    if (existFields) existFields.style.display = 'block';
+  }
+}
+
+function toggleTransferOptions() {
+  const checked = document.getElementById('ct-transfer-checkbox')?.checked;
+  const settTbody = document.getElementById('ct-settlements-tbody');
+  if (settTbody) {
+    settTbody.style.opacity = checked ? '1' : '0.35';
+  }
+}
+
+async function submitCloseAndTransfer() {
+  const batchId = document.getElementById('ct-batch-id').value;
+  if (!batchId) return;
+
+  const transferBalances = document.getElementById('ct-transfer-checkbox')?.checked ?? true;
+  const mode = document.querySelector('input[name="ct-target-mode"]:checked')?.value || 'new';
+
+  let nextBatch = null;
+  let nextBatchId = null;
+
+  if (mode === 'new') {
+    const name = document.getElementById('ct-new-batch-name').value.trim();
+    const fromDate = document.getElementById('ct-new-batch-from').value;
+    const toDate = document.getElementById('ct-new-batch-to').value;
+    if (!name || !fromDate || !toDate) {
+      alert('Please fill out Next Batch Name, From Date, and To Date.');
+      return;
+    }
+    nextBatch = { name, fromDate, toDate };
+  } else {
+    nextBatchId = document.getElementById('ct-existing-batch-select').value;
+    if (!nextBatchId) {
+      alert('Please select an existing batch or choose to create a new one.');
+      return;
+    }
+  }
+
+  const confirmMsg = transferBalances
+    ? `Are you sure you want to close this batch and carry forward balances into the next batch?\n\nThis will automatically generate opening adjustment entries in the new batch.`
+    : `Are you sure you want to close this batch without transferring balances?`;
+
+  if (!confirm(confirmMsg)) return;
+
+  const confirmBtn = document.getElementById('ct-confirm-btn');
+  const origText = confirmBtn ? confirmBtn.textContent : 'Confirm & Transfer Balances';
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Processing Transfer...';
+  }
+
+  try {
+    const res = await fetch(`/api/batches/${batchId}/close-and-transfer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transferBalances,
+        nextBatchId,
+        nextBatch
+      })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      alert(`✅ Success!\n\n${data.message}`);
+      closeCloseTransferModal();
+      closeBatchesModal();
+      await loadActiveBatch();
+      await loadBatchesTable();
+      if (state.activeView === 'dashboard') loadDashboard();
+      if (state.activeView === 'expenses') loadExpenses();
+    } else {
+      alert('Failed to close and transfer batch: ' + data.message);
+    }
+  } catch (err) {
+    alert('Error during batch transfer: ' + err.message);
+  } finally {
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = origText;
+    }
+  }
+}
+
 
 

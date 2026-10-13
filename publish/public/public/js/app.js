@@ -47,6 +47,13 @@ function startOfMonthDate() {
 }
 
 // -----------------------------------------------------------------------------
+// Prevent mouse scroll wheel from changing number input values
+document.addEventListener('wheel', () => {
+  if (document.activeElement && document.activeElement.type === 'number') {
+    document.activeElement.blur();
+  }
+}, { passive: true });
+
 // App Initialization
 // -----------------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', async () => {
@@ -54,7 +61,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   initSidebar();
   setupDefaultDates();
   await loadPublicSystemInfo();
-  showLoginModal();
+
+  // Session & Page Restore Logic on Refresh
+  const savedUser = localStorage.getItem('chaudry_mess_user');
+  if (savedUser) {
+    try {
+      state.user = JSON.parse(savedUser);
+      applyUserIdentity();
+      hideLoginModal();
+      await loadPersons();
+
+      // Restore active page/tab from URL hash or localStorage
+      const hashView = window.location.hash ? window.location.hash.replace('#', '') : '';
+      const savedView = hashView || localStorage.getItem('chaudry_mess_active_view') || 'dashboard';
+      switchView(savedView);
+    } catch (err) {
+      console.warn('Session restore notice:', err);
+      showLoginModal();
+    }
+  } else {
+    showLoginModal();
+  }
 });
 
 async function loadPublicSystemInfo() {
@@ -162,20 +189,13 @@ function hideLoginModal() {
 }
 
 function handleUserTypeChange() {
-  const userType = document.getElementById('login-username').value;
-  const hintEl = document.getElementById('login-hint');
-  const pwInput = document.getElementById('login-password');
   const errEl = document.getElementById('login-error');
   if (errEl) errEl.style.display = 'none';
-  if (pwInput) pwInput.value = '';
-  if (hintEl) {
-    if (userType === 'admin') {
-      hintEl.innerHTML = 'Default password for Admin: <span style="font-family: monospace; font-weight: bold;">changeme123</span>';
-    } else {
-      hintEl.innerHTML = 'Default password for User: <span style="font-family: monospace; font-weight: bold;">user123</span>';
-    }
+  const pwInput = document.getElementById('login-password');
+  if (pwInput) {
+    pwInput.value = '';
+    pwInput.focus();
   }
-  if (pwInput) pwInput.focus();
 }
 
 async function handleLogin(e) {
@@ -195,10 +215,13 @@ async function handleLogin(e) {
 
     if (data.success) {
       state.user = data.user;
+      localStorage.setItem('chaudry_mess_user', JSON.stringify(data.user));
       applyUserIdentity();
       hideLoginModal();
       await loadPersons();
-      await loadDashboard();
+      const hashView = window.location.hash ? window.location.hash.replace('#', '') : '';
+      const savedView = hashView || localStorage.getItem('chaudry_mess_active_view') || 'dashboard';
+      switchView(savedView);
     } else {
       errorEl.textContent = data.message || 'Invalid password';
       errorEl.style.display = 'block';
@@ -235,12 +258,18 @@ function handleLogoutOverlayClick(e) {
 function confirmLogout() {
   closeLogoutModal();
   state.user = null;
+  localStorage.removeItem('chaudry_mess_user');
+  localStorage.removeItem('chaudry_mess_active_view');
+  try {
+    history.replaceState(null, '', window.location.pathname);
+  } catch (_) {}
   const pwInput = document.getElementById('login-password');
   if (pwInput) pwInput.value = '';
   const errEl = document.getElementById('login-error');
   if (errEl) errEl.style.display = 'none';
   showLoginModal();
 }
+
 
 function applyUserIdentity() {
   if (!state.user) return;
@@ -255,7 +284,16 @@ function applyUserIdentity() {
   document.getElementById('report-doc-address').textContent = addr;
   document.getElementById('settings-shop-name').value = name;
   document.getElementById('settings-shop-address').value = addr;
-  document.getElementById('report-logo-char').textContent = name.trim().charAt(0).toUpperCase() || 'C';
+  const logoChar = name.trim().charAt(0).toUpperCase() || 'C';
+  document.getElementById('report-logo-char').textContent = logoChar;
+  const logoEl = document.querySelector('.sidebar-logo');
+  if (logoEl) logoEl.textContent = logoChar;
+  const loginLogoEl = document.querySelector('#login-modal div[style*="border-radius: 50%"]');
+  if (loginLogoEl) loginLogoEl.textContent = logoChar;
+  const loginShopNameEl = document.getElementById('login-shop-name');
+  if (loginShopNameEl) loginShopNameEl.textContent = name;
+  const loginShopAddrEl = document.getElementById('login-shop-address');
+  if (loginShopAddrEl) loginShopAddrEl.textContent = addr || 'Food Expense Manager & Reports';
 
   // Role badge in top-bar
   const roleBadge = document.getElementById('user-role-badge');
@@ -284,6 +322,9 @@ function applyUserIdentity() {
   // Refresh active views so delete buttons update according to role
   if (state.activeView === 'expenses') loadExpenses();
   if (state.activeView === 'persons') loadPersonsTable();
+
+  // Load active batch details
+  loadActiveBatch();
 }
 
 // -----------------------------------------------------------------------------
@@ -291,6 +332,12 @@ function applyUserIdentity() {
 // -----------------------------------------------------------------------------
 function switchView(viewName) {
   state.activeView = viewName;
+  localStorage.setItem('chaudry_mess_active_view', viewName);
+  try {
+    if (window.location.hash !== `#${viewName}`) {
+      history.replaceState(null, '', `#${viewName}`);
+    }
+  } catch (_) {}
 
   // Update navigation highlights
   const navItems = document.querySelectorAll('.sidebar-nav .nav-item');
@@ -324,6 +371,7 @@ function switchView(viewName) {
   if (viewName === 'reports') generateActiveReport();
   if (viewName === 'settings') loadDatabaseStatus();
 }
+
 
 // -----------------------------------------------------------------------------
 // Dashboard
@@ -407,26 +455,64 @@ function populatePersonSelects() {
   const expenseFilter = document.getElementById('expense-filter-person');
   const paidBy = document.getElementById('expense-input-paid-by');
   const reportPerson = document.getElementById('report-person-select');
+  const paymentPaidBy = document.getElementById('payment-input-paid-by');
+  const paymentReceivedBy = document.getElementById('payment-input-received-by');
+  const adjPaidBy = document.getElementById('adj-input-paid-by');
+  const adjReceivedBy = document.getElementById('adj-input-received-by');
 
   // Preserve selections if possible
   const currentPaid = paidBy ? paidBy.value : '';
   const currentReport = reportPerson ? reportPerson.value : '';
+  const currentPayPaid = paymentPaidBy ? paymentPaidBy.value : '';
+  const currentPayRecv = paymentReceivedBy ? paymentReceivedBy.value : '';
+  const currentAdjPaid = adjPaidBy ? adjPaidBy.value : '';
+  const currentAdjRecv = adjReceivedBy ? adjReceivedBy.value : '';
+
+  const optionsHtml = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
 
   if (expenseFilter) {
-    expenseFilter.innerHTML = `<option value="">All Persons</option>` +
-      state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    expenseFilter.innerHTML = `<option value="">All Persons</option>` + optionsHtml;
   }
 
   if (paidBy) {
-    paidBy.innerHTML = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    paidBy.innerHTML = optionsHtml;
     if (currentPaid) paidBy.value = currentPaid;
   }
 
   if (reportPerson) {
-    reportPerson.innerHTML = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    reportPerson.innerHTML = optionsHtml;
     if (currentReport) reportPerson.value = currentReport;
   }
+
+  if (paymentPaidBy) {
+    paymentPaidBy.innerHTML = optionsHtml;
+    if (currentPayPaid) paymentPaidBy.value = currentPayPaid;
+  }
+
+  if (paymentReceivedBy) {
+    paymentReceivedBy.innerHTML = optionsHtml;
+    if (currentPayRecv) {
+      paymentReceivedBy.value = currentPayRecv;
+    } else if (state.persons.length > 1) {
+      paymentReceivedBy.value = state.persons[1].id;
+    }
+  }
+
+  if (adjPaidBy) {
+    adjPaidBy.innerHTML = optionsHtml;
+    if (currentAdjPaid) adjPaidBy.value = currentAdjPaid;
+  }
+
+  if (adjReceivedBy) {
+    adjReceivedBy.innerHTML = optionsHtml;
+    if (currentAdjRecv) {
+      adjReceivedBy.value = currentAdjRecv;
+    } else if (state.persons.length > 1) {
+      adjReceivedBy.value = state.persons[1].id;
+    }
+  }
 }
+
 
 async function loadPersonsTable() {
   await loadPersons();
@@ -486,11 +572,24 @@ function closePersonModal() {
   document.getElementById('person-modal').style.display = 'none';
 }
 
+let isSavingPerson = false;
 async function savePerson(e) {
   e.preventDefault();
+  if (isSavingPerson) return;
+
   const id = document.getElementById('person-edit-id').value;
   const name = document.getElementById('person-input-name').value.trim();
   const mobileNumber = document.getElementById('person-input-mobile').value.trim();
+
+  const form = document.getElementById('person-form');
+  const btn = form ? form.querySelector('button[type="submit"]') : null;
+  const origText = btn ? btn.textContent : 'Save Member';
+
+  isSavingPerson = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
 
   try {
     const url = id ? `/api/persons/${id}` : '/api/persons';
@@ -513,6 +612,12 @@ async function savePerson(e) {
     }
   } catch (err) {
     alert('Failed to save person: ' + err.message);
+  } finally {
+    isSavingPerson = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   }
 }
 
@@ -672,14 +777,22 @@ async function loadExpenses() {
     const isAdmin = state.user && state.user.role === 'admin';
     state.expenses.forEach(e => {
       const tr = document.createElement('tr');
-      const catBadge = e.category ? `<span class="badge badge-primary">${e.category}</span>` : '<span style="color: var(--text-muted); font-size: 12px;">—</span>';
+      const isPayment = e.category === 'Payment';
+      const isAdjustment = e.category === 'Opening Adjustment';
+      const catBadge = isPayment
+        ? `<span class="badge" style="background-color: #d1fae5; color: #065f46; font-weight: 600;">💳 Payment</span>`
+        : (isAdjustment
+        ? `<span class="badge" style="background-color: #fef3c7; color: #92400e; font-weight: 600;">⚖️ Opening Adj</span>`
+        : (e.category ? `<span class="badge badge-primary">${e.category}</span>` : '<span style="color: var(--text-muted); font-size: 12px;">—</span>'));
       
+      const batchLabel = e.batchName ? `<div style="font-size: 11px; color: var(--text-muted); font-weight: normal;">🏷️ ${e.batchName}</div>` : '';
+
       tr.innerHTML = `
         <td>${formatDate(Number(e.date))}</td>
-        <td><strong>${e.description}</strong></td>
+        <td><strong>${e.description}</strong>${batchLabel}</td>
         <td>${catBadge}</td>
         <td>${e.paidByName}</td>
-        <td style="text-align: right; font-weight: 700;">${formatCurrency(e.amount)}</td>
+        <td style="text-align: right; font-weight: 700; ${isPayment ? 'color: #10B981;' : (isAdjustment ? 'color: #F59E0B;' : '')}">${formatCurrency(e.amount)}</td>
         <td style="text-align: center;">
           <button class="btn btn-secondary btn-sm" onclick="openExpenseModal(${e.id})">Edit</button>
           ${isAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">Delete</button>` : ''}
@@ -692,6 +805,163 @@ async function loadExpenses() {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Payment Modal & Actions (Member to Member Settlement)
+// -----------------------------------------------------------------------------
+function openPaymentModal() {
+  const modal = document.getElementById('payment-modal');
+  const dateInput = document.getElementById('payment-input-date');
+  const amountInput = document.getElementById('payment-input-amount');
+  const descInput = document.getElementById('payment-input-desc');
+
+  populatePersonSelects();
+
+  dateInput.value = toInputDate(new Date());
+  amountInput.value = '';
+  descInput.value = '';
+
+  modal.style.display = 'flex';
+}
+
+function closePaymentModal() {
+  const modal = document.getElementById('payment-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+let isSavingPayment = false;
+async function savePayment(e) {
+  e.preventDefault();
+  if (isSavingPayment) return;
+
+  const dateStr = document.getElementById('payment-input-date').value;
+  const paidByPersonId = parseInt(document.getElementById('payment-input-paid-by').value, 10);
+  const receivedByPersonId = parseInt(document.getElementById('payment-input-received-by').value, 10);
+  const amount = parseFloat(document.getElementById('payment-input-amount').value);
+  const description = document.getElementById('payment-input-desc').value.trim();
+
+  if (!paidByPersonId) {
+    alert('Please select who paid (Paid By).');
+    return;
+  }
+  if (!receivedByPersonId) {
+    alert('Please select who received (Received By).');
+    return;
+  }
+  if (paidByPersonId === receivedByPersonId) {
+    alert('Paid By and Received By cannot be the same person! Please select different members.');
+    return;
+  }
+  if (isNaN(amount) || amount <= 0) {
+    alert('Please enter a valid payment amount.');
+    return;
+  }
+
+  const dateObj = new Date(dateStr + 'T12:00:00');
+  const dateMillis = dateObj.getTime();
+
+  const payload = {
+    dateMillis,
+    paidByPersonId,
+    receivedByPersonId,
+    amount,
+    description
+  };
+
+  const btn = document.getElementById('payment-submit-btn');
+  const origText = btn ? btn.textContent : 'Save Payment';
+  isSavingPayment = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  try {
+    const res = await fetch('/api/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      closePaymentModal();
+      if (state.activeView === 'expenses') loadExpenses();
+      if (state.activeView === 'dashboard') loadDashboard();
+      if (state.activeView === 'reports') generateActiveReport();
+    } else {
+      alert('Error: ' + data.message);
+    }
+  } catch (err) {
+    alert('Failed to record payment: ' + err.message);
+  } finally {
+    isSavingPayment = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
+  }
+}
+
+// Payer mode: 'single' or 'multi'
+let currentPayerMode = 'single';
+
+function setPayerMode(mode) {
+  currentPayerMode = mode;
+  document.getElementById('payer-mode-single-btn').classList.toggle('active', mode === 'single');
+  document.getElementById('payer-mode-multi-btn').classList.toggle('active', mode === 'multi');
+  document.getElementById('payer-single-section').style.display = mode === 'single' ? '' : 'none';
+  document.getElementById('payer-multi-section').style.display = mode === 'multi' ? '' : 'none';
+  // Remove "required" from single dropdown when in multi mode
+  document.getElementById('expense-input-paid-by').required = (mode === 'single');
+  if (mode === 'multi') renderMultiPayerInputs({});
+}
+
+function renderMultiPayerInputs(existingPayers) {
+  // existingPayers: { personId: amountPaid }
+  const container = document.getElementById('multi-payer-list');
+  container.innerHTML = '';
+  const total = parseFloat(document.getElementById('expense-input-amount').value) || 0;
+
+  state.persons.forEach(p => {
+    const existing = existingPayers[Number(p.id)];
+    const row = document.createElement('div');
+    row.className = 'split-person-row custom';
+    row.innerHTML = `
+      <span style="font-size:14px;">${p.name}</span>
+      <input type="number" step="0.01" min="0" placeholder="0.00"
+        class="multi-payer-input" data-person-id="${p.id}"
+        value="${existing != null ? existing : ''}"
+        oninput="updateMultiPayerSummary()">
+    `;
+    container.appendChild(row);
+  });
+  updateMultiPayerSummary();
+}
+
+function updateMultiPayerSummary() {
+  const total = parseFloat(document.getElementById('expense-input-amount').value) || 0;
+  let entered = 0;
+  document.querySelectorAll('.multi-payer-input').forEach(inp => {
+    entered += parseFloat(inp.value) || 0;
+  });
+  entered = Math.round(entered * 100) / 100;
+  const remaining = Math.round((total - entered) * 100) / 100;
+
+  document.getElementById('multi-payer-total-expense').textContent = formatCurrency(total);
+  document.getElementById('multi-payer-entered').textContent = formatCurrency(entered);
+  const remEl = document.getElementById('multi-payer-remaining');
+  if (Math.abs(remaining) < 0.01) {
+    remEl.style.color = 'var(--success, #22c55e)';
+    remEl.textContent = '✓ ' + formatCurrency(0);
+  } else if (remaining < 0) {
+    remEl.style.color = 'var(--danger)';
+    remEl.textContent = `Over by ${formatCurrency(Math.abs(remaining))}`;
+  } else {
+    remEl.style.color = 'var(--danger)';
+    remEl.textContent = formatCurrency(remaining);
+  }
+}
+
 function openExpenseModal(expenseId = null) {
   const modal = document.getElementById('expense-modal');
   const title = document.getElementById('expense-modal-title');
@@ -700,7 +970,6 @@ function openExpenseModal(expenseId = null) {
   const descInput = document.getElementById('expense-input-desc');
   const amountInput = document.getElementById('expense-input-amount');
   const paidByInput = document.getElementById('expense-input-paid-by');
-  const splitContainer = document.getElementById('split-persons-list');
 
   populatePersonSelects();
 
@@ -715,11 +984,23 @@ function openExpenseModal(expenseId = null) {
         dateInput.value = toInputDate(Number(exp.date));
         descInput.value = exp.description;
         amountInput.value = exp.amount;
-        paidByInput.value = exp.paidByPersonId;
 
         // Set category chip
         state.selectedCategory = exp.category || null;
         updateCategoryChips();
+
+        // Restore payer mode from saved payers
+        const payers = data.payers || [];
+        if (payers.length > 1) {
+          // Multi-payer
+          setPayerMode('multi');
+          const existingMap = {};
+          payers.forEach(p => { existingMap[Number(p.personId)] = parseFloat(p.amountPaid); });
+          renderMultiPayerInputs(existingMap);
+        } else {
+          setPayerMode('single');
+          paidByInput.value = exp.paidByPersonId;
+        }
 
         // Render split checkboxes with selected person IDs
         const sharedPersonIds = new Set(data.shares.map(s => Number(s.personId)));
@@ -740,12 +1021,26 @@ function openExpenseModal(expenseId = null) {
     updateLiveSplitCalculation();
   }
 
+  // Always reset payer mode to single when opening modal (unless set above in edit)
+  if (!expenseId) {
+    setPayerMode('single');
+  }
+
+  // Always reset to equal split mode when opening modal
+  currentSplitMode = 'equal';
+  document.getElementById('split-mode-equal-btn').classList.add('active');
+  document.getElementById('split-mode-custom-btn').classList.remove('active');
+  document.getElementById('split-select-all-row').style.display = 'flex';
+  document.getElementById('live-split-preview').style.display = 'flex';
+  document.getElementById('custom-split-summary').style.display = 'none';
+
   modal.style.display = 'flex';
 }
 
 function closeExpenseModal() {
   document.getElementById('expense-modal').style.display = 'none';
 }
+
 
 function toggleCategoryChip(btn) {
   const cat = btn.getAttribute('data-category');
@@ -768,6 +1063,39 @@ function updateCategoryChips() {
   });
 }
 
+// Split mode: 'equal' or 'custom'
+let currentSplitMode = 'equal';
+
+function setSplitMode(mode) {
+  currentSplitMode = mode;
+  document.getElementById('split-mode-equal-btn').classList.toggle('active', mode === 'equal');
+  document.getElementById('split-mode-custom-btn').classList.toggle('active', mode === 'custom');
+
+  // Toggle visibility of controls
+  document.getElementById('split-select-all-row').style.display = mode === 'equal' ? 'flex' : 'none';
+  document.getElementById('live-split-preview').style.display = mode === 'equal' ? 'flex' : 'none';
+  document.getElementById('custom-split-summary').style.display = mode === 'custom' ? 'block' : 'none';
+
+  // Re-render persons list in new mode
+  if (mode === 'equal') {
+    // Keep current checked state from custom mode — collect which persons had non-zero amounts
+    const customInputs = document.querySelectorAll('.custom-split-input');
+    const selectedIds = new Set();
+    customInputs.forEach(inp => {
+      if (parseFloat(inp.value) > 0) selectedIds.add(Number(inp.dataset.personId));
+    });
+    renderSplitCheckboxes(selectedIds.size > 0 ? selectedIds : new Set(state.persons.map(p => Number(p.id))));
+    updateLiveSplitCalculation();
+  } else {
+    // Switch to custom: carry over checked persons from equal mode
+    const checkedIds = new Set(
+      Array.from(document.querySelectorAll('.split-checkbox:checked')).map(cb => Number(cb.value))
+    );
+    renderCustomSplitInputs(checkedIds);
+    updateCustomSplitSummary();
+  }
+}
+
 function renderSplitCheckboxes(selectedIds) {
   const container = document.getElementById('split-persons-list');
   container.innerHTML = '';
@@ -781,6 +1109,28 @@ function renderSplitCheckboxes(selectedIds) {
       <span>${p.name}</span>
     `;
     container.appendChild(label);
+  });
+}
+
+function renderCustomSplitInputs(selectedIds) {
+  const container = document.getElementById('split-persons-list');
+  container.innerHTML = '';
+  const totalAmount = parseFloat(document.getElementById('expense-input-amount').value) || 0;
+  const count = selectedIds.size || state.persons.length;
+  const defaultShare = count > 0 ? Math.round((totalAmount / count) * 100) / 100 : 0;
+
+  state.persons.forEach(p => {
+    const included = selectedIds.size === 0 || selectedIds.has(Number(p.id));
+    const row = document.createElement('div');
+    row.className = 'split-person-row custom';
+    row.innerHTML = `
+      <span style="font-size:14px;">${p.name}</span>
+      <input type="number" step="0.01" min="0" placeholder="0.00"
+        class="custom-split-input" data-person-id="${p.id}"
+        value="${included && defaultShare > 0 ? defaultShare : ''}"
+        oninput="updateCustomSplitSummary()">
+    `;
+    container.appendChild(row);
   });
 }
 
@@ -805,35 +1155,109 @@ function updateLiveSplitCalculation() {
   }
 }
 
+function updateCustomSplitSummary() {
+  const total = parseFloat(document.getElementById('expense-input-amount').value) || 0;
+  let entered = 0;
+  document.querySelectorAll('.custom-split-input').forEach(inp => {
+    entered += parseFloat(inp.value) || 0;
+  });
+  entered = Math.round(entered * 100) / 100;
+  const remaining = Math.round((total - entered) * 100) / 100;
+
+  document.getElementById('custom-split-total-expense').textContent = formatCurrency(total);
+  document.getElementById('custom-split-entered').textContent = formatCurrency(entered);
+  const remEl = document.getElementById('custom-split-remaining');
+  remEl.textContent = formatCurrency(Math.abs(remaining));
+  if (Math.abs(remaining) < 0.01) {
+    remEl.style.color = 'var(--success, #22c55e)';
+    remEl.textContent = '✓ ' + formatCurrency(0);
+  } else if (remaining < 0) {
+    remEl.style.color = 'var(--danger)';
+    remEl.textContent = `Over by ${formatCurrency(Math.abs(remaining))}`;
+  } else {
+    remEl.style.color = 'var(--danger)';
+    remEl.textContent = formatCurrency(remaining);
+  }
+}
+
+let isSavingExpense = false;
 async function saveExpense(e) {
   e.preventDefault();
+  if (isSavingExpense) return;
+
   const id = document.getElementById('expense-edit-id').value;
   const dateStr = document.getElementById('expense-input-date').value;
   const description = document.getElementById('expense-input-desc').value.trim();
   const amount = parseFloat(document.getElementById('expense-input-amount').value);
-  const paidByPersonId = parseInt(document.getElementById('expense-input-paid-by').value, 10);
   const category = state.selectedCategory;
-
-  const checked = document.querySelectorAll('.split-checkbox:checked');
-  const selectedPersonIds = Array.from(checked).map(cb => parseInt(cb.value, 10));
-
-  if (selectedPersonIds.length === 0) {
-    alert('Please select at least one person to split this expense with.');
-    return;
-  }
 
   // Parse local date string to epoch millis at noon to prevent TZ rollbacks
   const dateObj = new Date(dateStr + 'T12:00:00');
   const dateMillis = dateObj.getTime();
 
-  const payload = {
-    dateMillis,
-    description,
-    amount,
-    paidByPersonId,
-    selectedPersonIds,
-    category
-  };
+  // --- Resolve payers ---
+  let payerPayload = {};
+  if (currentPayerMode === 'multi') {
+    const multiPayers = [];
+    document.querySelectorAll('.multi-payer-input').forEach(inp => {
+      const val = parseFloat(inp.value);
+      if (val > 0) multiPayers.push({ personId: parseInt(inp.dataset.personId, 10), amountPaid: val });
+    });
+    if (multiPayers.length === 0) {
+      alert('Please enter at least one payer amount in Multi-Payer mode.');
+      return;
+    }
+    const payerTotal = multiPayers.reduce((s, p) => s + p.amountPaid, 0);
+    const diff = Math.abs(amount - Math.round(payerTotal * 100) / 100);
+    if (diff > 0.02) {
+      alert(`Payer amounts (${formatCurrency(Math.round(payerTotal*100)/100)}) must equal the total expense (${formatCurrency(amount)}).\nDifference: ${formatCurrency(diff)}`);
+      return;
+    }
+    payerPayload = { multiPayers };
+  } else {
+    const paidByPersonId = parseInt(document.getElementById('expense-input-paid-by').value, 10);
+    if (!paidByPersonId) { alert('Please select who paid.'); return; }
+    payerPayload = { paidByPersonId };
+  }
+
+  // --- Resolve split ---
+  let splitPayload = {};
+  if (currentSplitMode === 'custom') {
+    const customSplits = [];
+    document.querySelectorAll('.custom-split-input').forEach(inp => {
+      const val = parseFloat(inp.value);
+      if (val > 0) customSplits.push({ personId: parseInt(inp.dataset.personId, 10), shareAmount: val });
+    });
+    if (customSplits.length === 0) {
+      alert('Please enter at least one person\'s amount in the Custom Split.');
+      return;
+    }
+    const entered = customSplits.reduce((sum, s) => sum + s.shareAmount, 0);
+    const diff = Math.abs(amount - Math.round(entered * 100) / 100);
+    if (diff > 0.02) {
+      alert(`Custom split amounts (${formatCurrency(Math.round(entered*100)/100)}) must equal the total expense (${formatCurrency(amount)}).\nDifference: ${formatCurrency(diff)}`);
+      return;
+    }
+    splitPayload = { splitMode: 'custom', customSplits };
+  } else {
+    const checked = document.querySelectorAll('.split-checkbox:checked');
+    const selectedPersonIds = Array.from(checked).map(cb => parseInt(cb.value, 10));
+    if (selectedPersonIds.length === 0) {
+      alert('Please select at least one person to split this expense with.');
+      return;
+    }
+    splitPayload = { splitMode: 'equal', selectedPersonIds };
+  }
+
+  const payload = { dateMillis, description, amount, category, ...payerPayload, ...splitPayload };
+
+  const btn = document.getElementById('expense-submit-btn');
+  const origText = btn ? btn.textContent : 'Save Expense';
+  isSavingExpense = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
 
   try {
     const url = id ? `/api/expenses/${id}` : '/api/expenses';
@@ -856,8 +1280,16 @@ async function saveExpense(e) {
     }
   } catch (err) {
     alert('Failed to save expense: ' + err.message);
+  } finally {
+    isSavingExpense = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   }
 }
+
+
 
 function deleteExpense(id) {
   if (state.user && state.user.role === 'user') {
@@ -1390,23 +1822,49 @@ function shareReportWhatsApp() {
 // -----------------------------------------------------------------------------
 // Settings & Database Backup
 // -----------------------------------------------------------------------------
-async function saveShopAddress() {
+async function saveShopIdentity() {
+  const shopName = document.getElementById('settings-shop-name').value.trim();
   const address = document.getElementById('settings-shop-address').value.trim();
+  const msgEl = document.getElementById('settings-identity-msg');
+  if (msgEl) msgEl.textContent = '';
+
+  if (!shopName) {
+    alert('Company / Shop Name cannot be empty.');
+    return;
+  }
+
   try {
-    const res = await fetch('/api/auth/shop-address', {
+    const res = await fetch('/api/auth/shop-identity', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address })
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-role': state.user?.role || ''
+      },
+      body: JSON.stringify({ shopName, address })
     });
     const data = await res.json();
     if (data.success) {
-      if (state.user) state.user.shopAddress = address;
+      if (state.user) {
+        state.user.shopName = data.shopName;
+        state.user.shopAddress = data.shopAddress;
+      }
       applyUserIdentity();
-      alert('Shop address updated successfully!');
+      if (msgEl) {
+        msgEl.innerHTML = '<span style="color: var(--green-text); font-weight: 700;">✔ Company name and address saved successfully!</span>';
+      }
+      alert('Company / Shop details saved successfully!');
+    } else {
+      if (msgEl) msgEl.innerHTML = `<span style="color: var(--red-text);">✘ ${data.message}</span>`;
+      alert('Error: ' + data.message);
     }
   } catch (err) {
-    alert('Failed to update shop address: ' + err.message);
+    if (msgEl) msgEl.innerHTML = `<span style="color: var(--red-text);">✘ Error: ${err.message}</span>`;
+    alert('Failed to update company details: ' + err.message);
   }
+}
+
+function saveShopAddress() {
+  saveShopIdentity();
 }
 
 async function loadDatabaseStatus() {
@@ -1501,3 +1959,1109 @@ async function saveNewPassword(e) {
     errEl.style.display = 'block';
   }
 }
+
+// =============================================================================
+// AI VOICE ASSISTANT ENGINE (Zero-Install Web Speech & NLP Action Dispatcher)
+// =============================================================================
+let aiRecognition = null;
+let isAILocalListening = false;
+let shouldBeListening = false;
+let speechSilenceTimer = null;
+let lastRecognizedText = '';
+let aiCurrentLanguage = 'ur-PK'; // 'ur-PK' or 'en-US'
+
+function initAISpeechEngine() {
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRec) {
+    console.log('Web Speech API is not supported in this browser.');
+    return null;
+  }
+  const rec = new SpeechRec();
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.maxAlternatives = 1;
+  rec.lang = aiCurrentLanguage;
+
+  rec.onstart = () => {
+    isAILocalListening = true;
+    updateAIModalState();
+  };
+
+  rec.onresult = (event) => {
+    let interim = '';
+    let final = '';
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      const trans = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        final += trans;
+      } else {
+        interim += trans;
+      }
+    }
+    const current = (final || interim || '').trim();
+    if (current) {
+      lastRecognizedText = current;
+      const liveTextEl = document.getElementById('ai-live-text');
+      if (liveTextEl) {
+        liveTextEl.textContent = `"${current}"`;
+      }
+      const statusEl = document.getElementById('ai-status-text');
+      if (statusEl) statusEl.textContent = '⚡ سن رہا ہوں... (Listening)';
+
+      // Auto-trigger command after 1.2s of silence after speech
+      clearTimeout(speechSilenceTimer);
+      speechSilenceTimer = setTimeout(() => {
+        if (lastRecognizedText && shouldBeListening) {
+          executeAICommand(lastRecognizedText);
+          lastRecognizedText = '';
+        }
+      }, 1300);
+    }
+  };
+
+  rec.onerror = (event) => {
+    console.warn('AI Speech recognition error:', event.error);
+    const statusEl = document.getElementById('ai-status-text');
+
+    if (event.error === 'network') {
+      // If network error occurred on ur-PK (often Google speech server connection restriction), auto-switch to en-US
+      if (aiCurrentLanguage === 'ur-PK') {
+        console.log('Network error on ur-PK, auto-switching to en-US fallback...');
+        aiCurrentLanguage = 'en-US';
+        const btn = document.getElementById('ai-lang-btn');
+        if (btn) btn.textContent = '🇬🇧 English / Roman Urdu';
+        if (statusEl) statusEl.textContent = '🔄 وائس سرور سوئچ ہو گیا (English/Roman Urdu)';
+        try { rec.stop(); } catch (_) {}
+        setTimeout(() => {
+          if (shouldBeListening) {
+            aiRecognition = null;
+            startVoiceListening();
+          }
+        }, 400);
+        return;
+      }
+    }
+
+    if (event.error === 'not-allowed') {
+      shouldBeListening = false;
+      isAILocalListening = false;
+      updateAIModalState();
+      if (statusEl) statusEl.textContent = '❌ مائیکروفون کی اجازت نہیں ملی۔ براؤزر سیٹنگ سے مائیک Allow کریں۔';
+      return;
+    }
+
+    if (event.error === 'no-speech') {
+      // Normal silence pause, keep listening smoothly
+      return;
+    }
+
+    if (statusEl) {
+      statusEl.textContent = `مائیک آن ہے، بولتے رہیں... (${event.error})`;
+    }
+  };
+
+  rec.onend = () => {
+    // If modal is open and user wants to continue listening, seamlessly restart
+    const modal = document.getElementById('ai-assistant-modal');
+    if (shouldBeListening && modal && modal.style.display === 'flex') {
+      try {
+        rec.start();
+        return;
+      } catch (e) {
+        // Handled below
+      }
+    }
+    isAILocalListening = false;
+    updateAIModalState();
+  };
+
+  return rec;
+}
+
+function toggleAIAssistant() {
+  const modal = document.getElementById('ai-assistant-modal');
+  if (!modal) return;
+  if (modal.style.display === 'flex') {
+    closeAIAssistant();
+  } else {
+    openAIAssistant();
+  }
+}
+
+function openAIAssistant() {
+  const modal = document.getElementById('ai-assistant-modal');
+  if (modal) modal.style.display = 'flex';
+  const input = document.getElementById('ai-manual-command-input');
+  if (input) input.value = '';
+  const feedback = document.getElementById('ai-feedback-banner');
+  if (feedback) feedback.style.display = 'none';
+  const statusEl = document.getElementById('ai-status-text');
+  if (statusEl) statusEl.textContent = 'مائیک آن ہے، روانی سے بولیں... (Listening)';
+  const liveEl = document.getElementById('ai-live-text');
+  if (liveEl) liveEl.textContent = '"بولنے کا انتظار ہے..."';
+  
+  // Start continuous listening on open
+  setTimeout(() => startVoiceListening(), 150);
+}
+
+function closeAIAssistant() {
+  stopVoiceListening();
+  const modal = document.getElementById('ai-assistant-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function handleAIOverlayClick(e) {
+  if (e.target && e.target.id === 'ai-assistant-modal') {
+    closeAIAssistant();
+  }
+}
+
+function toggleAILanguage() {
+  aiCurrentLanguage = (aiCurrentLanguage === 'ur-PK') ? 'en-US' : 'ur-PK';
+  const btn = document.getElementById('ai-lang-btn');
+  if (btn) {
+    btn.textContent = (aiCurrentLanguage === 'ur-PK') ? '🇵🇰 Urdu / EN' : '🇬🇧 English / Roman Urdu';
+  }
+  if (shouldBeListening) {
+    stopVoiceListening();
+    aiRecognition = null;
+    setTimeout(() => startVoiceListening(), 250);
+  }
+}
+
+function toggleVoiceListening() {
+  if (isAILocalListening) {
+    stopVoiceListening();
+  } else {
+    startVoiceListening();
+  }
+}
+
+function startVoiceListening() {
+  shouldBeListening = true;
+  lastRecognizedText = '';
+  clearTimeout(speechSilenceTimer);
+  try {
+    if (!aiRecognition) {
+      aiRecognition = initAISpeechEngine();
+    }
+    if (aiRecognition) {
+      aiRecognition.lang = aiCurrentLanguage;
+      aiRecognition.start();
+    } else {
+      const statusEl = document.getElementById('ai-status-text');
+      if (statusEl) statusEl.textContent = 'براؤزر وائس سپورٹ نہیں کرتا۔ نیچے ٹیکسٹ ٹائپ کریں۔';
+    }
+  } catch (err) {
+    console.warn('Voice start notice:', err);
+  }
+}
+
+function stopVoiceListening() {
+  shouldBeListening = false;
+  clearTimeout(speechSilenceTimer);
+  if (aiRecognition) {
+    try { aiRecognition.stop(); } catch (_) {}
+  }
+  isAILocalListening = false;
+  updateAIModalState();
+}
+
+function updateAIModalState() {
+  const micBtn = document.getElementById('ai-big-mic-btn');
+  const vis = document.getElementById('ai-visualizer');
+  const box = document.getElementById('ai-transcript-box');
+  const hint = document.getElementById('ai-mic-hint');
+  const statusEl = document.getElementById('ai-status-text');
+
+  if (isAILocalListening) {
+    if (micBtn) micBtn.classList.add('active');
+    if (vis) vis.classList.add('ai-listening');
+    if (box) box.classList.add('listening');
+    if (hint) hint.textContent = '🎙️ بولیں، میں سن رہا ہوں... (Listening)';
+    if (statusEl) statusEl.textContent = 'Listening... بولیں...';
+  } else {
+    if (micBtn) micBtn.classList.remove('active');
+    if (vis) vis.classList.remove('ai-listening');
+    if (box) box.classList.remove('listening');
+    if (hint) hint.textContent = 'مائیک پر کلک کر کے بولنا شروع کریں';
+  }
+}
+
+function handleManualAICommand(e) {
+  e.preventDefault();
+  const input = document.getElementById('ai-manual-command-input');
+  if (!input) return;
+  const cmd = input.value.trim();
+  if (cmd) {
+    executeAICommand(cmd);
+    input.value = '';
+  }
+}
+
+function showAIFeedback(msg, isSuccess = true) {
+  const fb = document.getElementById('ai-feedback-banner');
+  if (fb) {
+    fb.style.display = 'block';
+    fb.style.background = isSuccess ? '#DFF5E4' : '#FBE1E1';
+    fb.style.color = isSuccess ? '#0F5C25' : '#8A1616';
+    fb.style.borderColor = isSuccess ? '#bcebc5' : '#f5c4c4';
+    fb.innerHTML = msg;
+  }
+  const statusEl = document.getElementById('ai-status-text');
+  if (statusEl) statusEl.textContent = isSuccess ? '⚡ Action Completed!' : '⚠️ Could not execute command';
+}
+
+// Convert Urdu/Arabic digits and spoken words to standard numbers
+function parseSpokenAmount(rawText) {
+  if (!rawText) return null;
+  let text = rawText.toString().toLowerCase();
+
+  // Convert Urdu/Arabic numerals
+  const urduNums = { '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9' };
+  text = text.replace(/[۰-۹]/g, c => urduNums[c] || c);
+
+  // Check word numbers
+  let wordAmount = 0;
+  if (text.includes('ہزار') || text.includes('thousand')) {
+    const match = text.match(/(\d+)\s*(ہزار|thousand)/);
+    if (match) wordAmount += parseInt(match[1], 10) * 1000;
+    else wordAmount += 1000;
+  }
+  if (text.includes('پانچ سو') || text.includes('panch sau') || text.includes('500')) return 500;
+  if (text.includes('ڈیڑھ سو') || text.includes('dedh sau') || text.includes('150')) return 150;
+  if (text.includes('ڈھائی سو') || text.includes('dhai sau') || text.includes('250')) return 250;
+  if (text.includes('تین سو') || text.includes('teen sau') || text.includes('300')) return 300;
+  if (text.includes('چار سو') || text.includes('char sau') || text.includes('400')) return 400;
+  if (text.includes('چھ سو') || text.includes('che sau') || text.includes('600')) return 600;
+  if (text.includes('سات سو') || text.includes('sat sau') || text.includes('700')) return 700;
+  if (text.includes('آٹھ سو') || text.includes('aath sau') || text.includes('800')) return 800;
+  if (text.includes('نو سو') || text.includes('nau sau') || text.includes('900')) return 900;
+  if (text.includes('ایک سو') || text.includes('ek sau') || text.includes('100')) return 100;
+  if (text.includes('دو سو') || text.includes('do sau') || text.includes('200')) return 200;
+
+  if (wordAmount > 0) return wordAmount;
+
+  // Standard regex number extraction
+  const numMatch = text.match(/(\d+(\.\d+)?)/);
+  if (numMatch) {
+    return parseFloat(numMatch[1]);
+  }
+  return null;
+}
+
+// Find matching person from state.persons
+function matchPerson(text) {
+  if (!text || !state.persons || state.persons.length === 0) return null;
+  const clean = text.toLowerCase();
+
+  for (const p of state.persons) {
+    const pName = (p.name || '').toLowerCase();
+    if (clean.includes(pName)) return p;
+    // Split multi-word names
+    const parts = pName.split(/\s+/);
+    for (const part of parts) {
+      if (part.length >= 3 && clean.includes(part)) return p;
+    }
+  }
+  return null;
+}
+
+// NLP Action Dispatcher
+function executeAICommand(rawCommand) {
+  if (!rawCommand || !rawCommand.trim()) return;
+  const cmd = rawCommand.trim().toLowerCase();
+  const originalText = rawCommand.trim();
+
+  const liveTextEl = document.getElementById('ai-live-text');
+  if (liveTextEl) liveTextEl.textContent = `"${originalText}"`;
+
+  // 1. NAVIGATION COMMANDS
+  // Dashboard
+  if (cmd.includes('dashboard') || cmd.includes('ڈیش بورڈ') || cmd.includes('home') || cmd.includes('ہوم') || cmd.includes('مین پیج')) {
+    switchView('dashboard');
+    showAIFeedback('✅ Dashboard opened!');
+    setTimeout(() => closeAIAssistant(), 1000);
+    return;
+  }
+
+  // Reports
+  if (cmd.includes('report') || cmd.includes('رپورٹ') || cmd.includes('رپورٹس') || cmd.includes('لیجر')) {
+    if (cmd.includes('print') || cmd.includes('پرنٹ')) {
+      switchView('reports');
+      setTimeout(() => {
+        printReport();
+        showAIFeedback('🖨️ Printing Report...');
+        setTimeout(() => closeAIAssistant(), 1000);
+      }, 500);
+      return;
+    }
+    if (cmd.includes('whatsapp') || cmd.includes('واٹس ایپ') || cmd.includes('شیئر')) {
+      switchView('reports');
+      setTimeout(() => {
+        shareReportWhatsApp();
+        showAIFeedback('💬 Opening WhatsApp share...');
+        setTimeout(() => closeAIAssistant(), 1000);
+      }, 500);
+      return;
+    }
+    if (cmd.includes('summary') || cmd.includes('سمری') || cmd.includes('group') || cmd.includes('گروپ')) {
+      switchView('reports');
+      switchReportTab('group-summary');
+      showAIFeedback('📊 Group Summary Report opened!');
+      setTimeout(() => closeAIAssistant(), 1000);
+      return;
+    }
+    if (cmd.includes('day') || cmd.includes('دن') || cmd.includes('روزانہ') || cmd.includes('روز')) {
+      switchView('reports');
+      switchReportTab('day-wise');
+      showAIFeedback('📅 Day-Wise Report opened!');
+      setTimeout(() => closeAIAssistant(), 1000);
+      return;
+    }
+    switchView('reports');
+    showAIFeedback('📑 Reports opened!');
+    setTimeout(() => closeAIAssistant(), 1000);
+    return;
+  }
+
+  // Persons / Members
+  if (cmd.includes('person') || cmd.includes('member') || cmd.includes('ممبر') || cmd.includes('افراد') || cmd.includes('پرسن')) {
+    if (cmd.includes('add') || cmd.includes('نیا') || cmd.includes('شامل')) {
+      openPersonModal();
+      showAIFeedback('👥 Add Member form opened!');
+      setTimeout(() => closeAIAssistant(), 1000);
+      return;
+    }
+    switchView('persons');
+    showAIFeedback('👥 Members list opened!');
+    setTimeout(() => closeAIAssistant(), 1000);
+    return;
+  }
+
+  // Settings & Theme
+  if (cmd.includes('theme') || cmd.includes('dark') || cmd.includes('light') || cmd.includes('ڈارک') || cmd.includes('نائٹ')) {
+    toggleTheme();
+    showAIFeedback('🌓 Theme toggled!');
+    setTimeout(() => closeAIAssistant(), 1000);
+    return;
+  }
+
+  if (cmd.includes('password') || cmd.includes('پاس ورڈ')) {
+    openChangePasswordModal();
+    showAIFeedback('🔒 Change Password opened!');
+    setTimeout(() => closeAIAssistant(), 1000);
+    return;
+  }
+
+  if (cmd.includes('setting') || cmd.includes('سیٹنگ') || cmd.includes('backup') || cmd.includes('بیک اپ')) {
+    switchView('settings');
+    showAIFeedback('⚙️ Settings opened!');
+    setTimeout(() => closeAIAssistant(), 1000);
+    return;
+  }
+
+  // 2. PAYMENT RECEIVE COMMANDS
+  if (cmd.includes('payment') || cmd.includes('پیمنٹ') || cmd.includes('وصولی') || cmd.includes('receive') || cmd.includes('ادائیگی')) {
+    openPaymentModal();
+    const amt = parseSpokenAmount(cmd);
+    if (amt) {
+      const amtInput = document.getElementById('payment-input-amount');
+      if (amtInput) amtInput.value = amt;
+    }
+
+    // Try finding paid by and received by persons
+    const foundPersons = [];
+    if (state.persons && state.persons.length > 0) {
+      for (const p of state.persons) {
+        if (cmd.includes((p.name || '').toLowerCase())) {
+          foundPersons.push(p);
+        }
+      }
+    }
+    if (foundPersons.length >= 1) {
+      const paidBySel = document.getElementById('payment-input-paid-by');
+      if (paidBySel) paidBySel.value = foundPersons[0].id;
+    }
+    if (foundPersons.length >= 2) {
+      const recBySel = document.getElementById('payment-input-received-by');
+      if (recBySel) recBySel.value = foundPersons[1].id;
+    }
+
+    showAIFeedback('💳 Payment Receive Form opened' + (amt ? ` with Rs. ${amt}` : '') + '!');
+    setTimeout(() => closeAIAssistant(), 1200);
+    return;
+  }
+
+  // 3. OPENING ADJUSTMENT COMMANDS
+  if (cmd.includes('opening') || cmd.includes('ابتدائی') || cmd.includes('adjustment') || cmd.includes('ایڈجسٹمنٹ')) {
+    openOpeningAdjustmentModal();
+    const amt = parseSpokenAmount(cmd);
+    if (amt) {
+      const amtInput = document.getElementById('adj-input-amount');
+      if (amtInput) amtInput.value = amt;
+    }
+    showAIFeedback('⚖️ Opening Adjustment Form opened' + (amt ? ` with Rs. ${amt}` : '') + '!');
+    setTimeout(() => closeAIAssistant(), 1200);
+    return;
+  }
+
+  // 4. BATCHES MANAGEMENT COMMANDS
+  if (cmd.includes('transfer batch') || cmd.includes('close batch') || cmd.includes('بیچ ٹرانسفر') || cmd.includes('بیچ بند')) {
+    triggerCloseTransferCurrent();
+    showAIFeedback('🔄 Batch Close & Transfer opened!');
+    setTimeout(() => closeAIAssistant(), 1200);
+    return;
+  }
+  if (cmd.includes('batch') || cmd.includes('بیچ')) {
+    openBatchesModal();
+    showAIFeedback('📅 Batches Management opened!');
+    setTimeout(() => closeAIAssistant(), 1200);
+    return;
+  }
+
+  // 5. EXPENSE SMART AUTO-FILL COMMANDS
+  // Check if speech contains expense keywords, amounts, categories or names
+  const amt = parseSpokenAmount(cmd);
+  const matchedPerson = matchPerson(cmd);
+
+  let detectedCategory = 'Other';
+  let detectedDesc = '';
+
+  if (cmd.includes('ناشتہ') || cmd.includes('breakfast') || cmd.includes('paratha') || cmd.includes('انڈا') || cmd.includes('چائے') || cmd.includes('chai') || cmd.includes('روٹی') || cmd.includes('roti')) {
+    detectedCategory = 'Breakfast';
+    detectedDesc = 'Breakfast (ناشتہ)';
+  } else if (cmd.includes('دوپہر') || cmd.includes('lunch') || cmd.includes('بریانی') || cmd.includes('biryani') || cmd.includes('دال') || cmd.includes('سبزی')) {
+    detectedCategory = 'Lunch';
+    detectedDesc = 'Lunch (دوپہر کا کھانا)';
+  } else if (cmd.includes('رات') || cmd.includes('dinner') || cmd.includes('کڑاہی') || cmd.includes('karahi') || cmd.includes('گوشت') || cmd.includes('chicken') || cmd.includes('مرغی')) {
+    detectedCategory = 'Dinner';
+    detectedDesc = 'Dinner (رات کا کھانا)';
+  } else if (cmd.includes('دودھ') || cmd.includes('milk') || cmd.includes('پھل') || cmd.includes('fruit') || cmd.includes('سودا') || cmd.includes('grocery')) {
+    detectedCategory = 'Other';
+    detectedDesc = 'Grocery / Items';
+  } else {
+    detectedDesc = 'Daily Mess Expense';
+  }
+
+  // If specific item word exists, use it in description
+  if (cmd.includes('روٹی') || cmd.includes('roti')) detectedDesc = 'Khameri Roti / Naan';
+  if (cmd.includes('چائے') || cmd.includes('chai')) detectedDesc = 'Chai / Tea';
+  if (cmd.includes('انڈے') || cmd.includes('eggs')) detectedDesc = 'Eggs / Omelette';
+  if (cmd.includes('بریانی') || cmd.includes('biryani')) detectedDesc = 'Biryani';
+  if (cmd.includes('کڑاہی') || cmd.includes('karahi')) detectedDesc = 'Chicken Karahi';
+  if (cmd.includes('دودھ') || cmd.includes('milk')) detectedDesc = 'Milk / Doodh';
+
+  // If the command asks to open expense form or contains data
+  if (cmd.includes('expense') || cmd.includes('خرچہ') || cmd.includes('کھولو') || cmd.includes('add') || amt || matchedPerson) {
+    openExpenseModal();
+
+    if (amt) {
+      const amtInput = document.getElementById('expense-input-amount');
+      if (amtInput) {
+        amtInput.value = amt;
+        amtInput.dispatchEvent(new Event('input'));
+      }
+    }
+
+    if (detectedDesc) {
+      const descInput = document.getElementById('expense-input-desc');
+      if (descInput) descInput.value = detectedDesc;
+    }
+
+    if (detectedCategory) {
+      setCategory(detectedCategory);
+    }
+
+    if (matchedPerson) {
+      const payerSel = document.getElementById('expense-input-paid-by');
+      if (payerSel) payerSel.value = matchedPerson.id;
+    }
+
+    let summaryText = '➕ Expense Form opened';
+    if (amt) summaryText += ` (Rs. ${amt})`;
+    if (matchedPerson) summaryText += ` for ${matchedPerson.name}`;
+    if (detectedCategory) summaryText += ` [${detectedCategory}]`;
+
+    showAIFeedback(summaryText + ' ✨');
+    setTimeout(() => closeAIAssistant(), 1200);
+    return;
+  }
+
+  // Fallback: Show understanding message
+  showAIFeedback(`🤖 Command: "${originalText}" (کمانڈ واضح نہیں، دوبارہ بولیں)`, false);
+}
+
+// -----------------------------------------------------------------------------
+// Opening Adjustment Modal & Actions
+// -----------------------------------------------------------------------------
+function openOpeningAdjustmentModal() {
+  const modal = document.getElementById('opening-adjustment-modal');
+  const dateInput = document.getElementById('adj-input-date');
+  const amountInput = document.getElementById('adj-input-amount');
+  const descInput = document.getElementById('adj-input-desc');
+
+  populatePersonSelects();
+
+  dateInput.value = toInputDate(new Date());
+  amountInput.value = '';
+  descInput.value = 'Opening Balance';
+
+  modal.style.display = 'flex';
+}
+
+function closeOpeningAdjustmentModal() {
+  const modal = document.getElementById('opening-adjustment-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+let isSavingOpeningAdjustment = false;
+async function saveOpeningAdjustment(e) {
+  e.preventDefault();
+  if (isSavingOpeningAdjustment) return;
+
+  const dateStr = document.getElementById('adj-input-date').value;
+  const paidByPersonId = parseInt(document.getElementById('adj-input-paid-by').value, 10);
+  const receivedByPersonId = parseInt(document.getElementById('adj-input-received-by').value, 10);
+  const amount = parseFloat(document.getElementById('adj-input-amount').value);
+  const description = document.getElementById('adj-input-desc').value.trim() || 'Opening Balance';
+
+  if (!paidByPersonId) {
+    alert('Please select who paid / brought forward opening balance (Paid By / Adjusted By).');
+    return;
+  }
+  if (!receivedByPersonId) {
+    alert('Please select who received / adjusted for (Received By / Adjusted For).');
+    return;
+  }
+  if (paidByPersonId === receivedByPersonId) {
+    alert('Paid By and Received By cannot be the same member! Please select different members.');
+    return;
+  }
+  if (isNaN(amount) || amount <= 0) {
+    alert('Please enter a valid adjustment amount.');
+    return;
+  }
+
+  const dateObj = new Date(dateStr + 'T12:00:00');
+  const dateMillis = dateObj.getTime();
+
+  const payload = {
+    dateMillis,
+    paidByPersonId,
+    receivedByPersonId,
+    amount,
+    description
+  };
+
+  const btn = document.getElementById('adj-submit-btn');
+  const origText = btn ? btn.textContent : 'Save Opening Adjustment';
+  isSavingOpeningAdjustment = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  try {
+    const res = await fetch('/api/opening-adjustments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      closeOpeningAdjustmentModal();
+      if (state.activeView === 'expenses') loadExpenses();
+      if (state.activeView === 'dashboard') loadDashboard();
+      if (state.activeView === 'reports') generateActiveReport();
+      alert('Opening Adjustment saved successfully!');
+    } else {
+      alert('Error: ' + data.message);
+    }
+  } catch (err) {
+    alert('Failed to record opening adjustment: ' + err.message);
+  } finally {
+    isSavingOpeningAdjustment = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Batch Management
+// -----------------------------------------------------------------------------
+// Helper to display friendly batch dates (e.g. 08 Oct 2026)
+function formatBatchDisplayDate(val) {
+  if (!val) return '';
+  const num = Number(val);
+  const d = !isNaN(num) && num > 100000 ? new Date(num) : new Date(val);
+  if (isNaN(d.getTime())) return String(val);
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+async function loadActiveBatch() {
+  try {
+    const res = await fetch('/api/batches/active');
+    const data = await res.json();
+    const batchPill = document.getElementById('active-batch-pill');
+    const bannerCard = document.getElementById('active-batch-banner-card');
+    const bannerName = document.getElementById('active-batch-banner-name');
+    const bannerDates = document.getElementById('active-batch-banner-dates');
+
+    if (data.success && data.batch) {
+      state.activeBatch = data.batch;
+      const rawFrom = data.batch.fromDate ?? data.batch.FROMDate ?? data.batch.fromdate;
+      const rawTo = data.batch.toDate ?? data.batch.TODate ?? data.batch.todate;
+      const fromStr = formatBatchDisplayDate(rawFrom);
+      const toStr = formatBatchDisplayDate(rawTo);
+      const dateRangeText = (fromStr && toStr) ? ` <span style="font-size: 10px; opacity: 0.85; margin-left: 2px;">(${fromStr} to ${toStr})</span>` : '';
+
+      if (batchPill) {
+        batchPill.innerHTML = `📅 <strong>${data.batch.name}</strong>${dateRangeText}`;
+        batchPill.title = `Current active batch: ${data.batch.name}. Click to manage.`;
+      }
+
+      if (bannerCard && bannerName) {
+        bannerCard.style.display = 'flex';
+        bannerName.textContent = data.batch.name;
+        if (bannerDates) {
+          bannerDates.textContent = (fromStr && toStr) ? `Batch Period: ${fromStr} to ${toStr}` : '';
+        }
+      }
+    } else {
+      state.activeBatch = null;
+      if (batchPill) {
+        batchPill.innerHTML = `📅 <strong>No Active Batch</strong>`;
+        batchPill.title = 'No active batch set. Click to create or activate a batch.';
+      }
+      if (bannerCard) {
+        bannerCard.style.display = 'none';
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load active batch:', err);
+  }
+}
+
+function openBatchesModal() {
+  resetBatchForm();
+  loadBatchesTable();
+  const modal = document.getElementById('batches-modal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeBatchesModal() {
+  const modal = document.getElementById('batches-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function resetBatchForm() {
+  document.getElementById('batch-edit-id').value = '';
+  document.getElementById('batch-input-name').value = '';
+  document.getElementById('batch-input-from').value = '';
+  document.getElementById('batch-input-to').value = '';
+  document.getElementById('batch-input-status').value = 'active';
+  const title = document.getElementById('batch-form-title');
+  if (title) title.textContent = '➕ Add / Edit Batch';
+  const btn = document.getElementById('batch-submit-btn');
+  if (btn) btn.textContent = 'Save Batch';
+}
+
+async function loadBatchesTable() {
+  const tbody = document.getElementById('batches-table-body');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;">Loading batches...</td></tr>';
+
+  try {
+    const res = await fetch('/api/batches');
+    const data = await res.json();
+    if (!data.success) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger);">Failed to load batches: ${data.message}</td></tr>`;
+      return;
+    }
+
+    const batches = data.batches || [];
+    if (batches.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: var(--text-muted);">No batches created yet.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = batches.map(b => {
+      const isActive = b.status === 'active';
+      const statusBadge = isActive
+        ? '<span class="badge badge-green">Active (Current)</span>'
+        : '<span class="badge" style="background:#e2e8f0; color:#475569;">Closed</span>';
+      
+      const actionButtons = isActive
+        ? `
+            <button class="btn btn-sm" onclick="openCloseTransferModal(${b.id})" style="background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 4px; margin-right: 4px;" title="Close this batch and transfer balances to next batch">🔄 Close & Transfer</button>
+            <button class="btn btn-secondary btn-sm" onclick='editBatch(${JSON.stringify(b).replace(/'/g, "&#39;")})' style="font-size: 11px; padding: 4px 8px;">Edit</button>
+            <button class="btn btn-secondary btn-sm" onclick="toggleBatchStatus(${b.id}, 'closed')" style="font-size: 11px; padding: 4px 8px;">Close Only</button>
+          `
+        : `
+            <button class="btn btn-secondary btn-sm" onclick='editBatch(${JSON.stringify(b).replace(/'/g, "&#39;")})' style="font-size: 11px; padding: 4px 8px;">Edit</button>
+            <button class="btn btn-primary btn-sm" onclick="toggleBatchStatus(${b.id}, 'active')" style="font-size: 11px; padding: 4px 8px;">Set Active</button>
+          `;
+
+      const rawFrom = b.fromDate ?? b.FROMDate ?? b.fromdate;
+      const rawTo = b.toDate ?? b.TODate ?? b.todate;
+      const displayFrom = formatBatchDisplayDate(rawFrom);
+      const displayTo = formatBatchDisplayDate(rawTo);
+
+      return `
+        <tr>
+          <td><strong>${escapeHtml(b.name)}</strong></td>
+          <td>${displayFrom}</td>
+          <td>${displayTo}</td>
+          <td>${statusBadge}</td>
+          <td style="text-align: right;">${b.totalEntries || b.entryCount || 0}</td>
+          <td style="text-align: right; font-weight: 700;">${formatCurrency(b.totalExpense || 0)}</td>
+          <td style="text-align: center; white-space: nowrap;">
+            ${actionButtons}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger);">${err.message}</td></tr>`;
+  }
+}
+
+function editBatch(batch) {
+  const rawFrom = batch.fromDate ?? batch.FROMDate ?? batch.fromdate;
+  const rawTo = batch.toDate ?? batch.TODate ?? batch.todate;
+  document.getElementById('batch-edit-id').value = batch.id;
+  document.getElementById('batch-input-name').value = batch.name;
+  document.getElementById('batch-input-from').value = toInputDate(rawFrom);
+  document.getElementById('batch-input-to').value = toInputDate(rawTo);
+  document.getElementById('batch-input-status').value = batch.status || 'active';
+  const title = document.getElementById('batch-form-title');
+  if (title) title.textContent = `✏️ Edit Batch #${batch.id}`;
+  const btn = document.getElementById('batch-submit-btn');
+  if (btn) btn.textContent = 'Update Batch';
+}
+
+async function saveBatch(e) {
+  e.preventDefault();
+  const id = document.getElementById('batch-edit-id').value;
+  const name = document.getElementById('batch-input-name').value.trim();
+  const fromDate = document.getElementById('batch-input-from').value;
+  const toDate = document.getElementById('batch-input-to').value;
+  const status = document.getElementById('batch-input-status').value;
+
+  if (!name || !fromDate || !toDate) {
+    alert('Please fill out batch name, from date, and to date.');
+    return;
+  }
+
+  const payload = { name, fromDate, toDate, status };
+  const btn = document.getElementById('batch-submit-btn');
+  const origText = btn ? btn.textContent : 'Save Batch';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  try {
+    const url = id ? `/api/batches/${id}` : '/api/batches';
+    const method = id ? 'PUT' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      resetBatchForm();
+      await loadBatchesTable();
+      await loadActiveBatch();
+      if (state.activeView === 'dashboard') loadDashboard();
+      if (state.activeView === 'expenses') loadExpenses();
+      alert('Batch saved successfully!');
+    } else {
+      alert('Error: ' + data.message);
+    }
+  } catch (err) {
+    alert('Failed to save batch: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
+  }
+}
+
+async function toggleBatchStatus(id, newStatus) {
+  try {
+    const res = await fetch(`/api/batches/${id}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus })
+    });
+    const data = await res.json();
+    if (data.success) {
+      await loadBatchesTable();
+      await loadActiveBatch();
+      if (state.activeView === 'dashboard') loadDashboard();
+      if (state.activeView === 'expenses') loadExpenses();
+    } else {
+      alert('Error: ' + data.message);
+    }
+  } catch (err) {
+    alert('Failed to change batch status: ' + err.message);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// BATCH CLOSING & AUTOMATIC BALANCE TRANSFER
+// -----------------------------------------------------------------------------
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function triggerCloseTransferCurrent() {
+  if (state.activeBatch && state.activeBatch.id) {
+    openCloseTransferModal(state.activeBatch.id);
+  } else {
+    alert('No active batch currently set to close.');
+  }
+}
+
+async function openCloseTransferModal(batchId) {
+  const modal = document.getElementById('close-transfer-modal');
+  if (!modal) return;
+
+  document.getElementById('ct-batch-id').value = batchId;
+  modal.style.display = 'flex';
+
+  const loadingEl = document.getElementById('ct-loading');
+  const contentEl = document.getElementById('ct-content-area');
+  const confirmBtn = document.getElementById('ct-confirm-btn');
+
+  if (loadingEl) loadingEl.style.display = 'block';
+  if (contentEl) contentEl.style.display = 'none';
+  if (confirmBtn) confirmBtn.disabled = true;
+
+  try {
+    const res = await fetch(`/api/batches/${batchId}/closing-preview`);
+    const data = await res.json();
+
+    if (!data.success) {
+      alert('Failed to load batch preview: ' + data.message);
+      closeCloseTransferModal();
+      return;
+    }
+
+    // 1. Header info
+    document.getElementById('ct-old-batch-name').textContent = data.batch.name;
+    const fromStr = formatBatchDisplayDate(data.batch.fromDate);
+    const toStr = formatBatchDisplayDate(data.batch.toDate);
+    document.getElementById('ct-old-batch-dates').textContent = (fromStr && toStr) ? `Period: ${fromStr} to ${toStr}` : '';
+    document.getElementById('ct-total-transferred-stat').textContent = formatCurrency(data.totalTransferredAmount || 0);
+    document.getElementById('ct-members-stat').textContent = `${data.totalCreditors || 0} Creditors · ${data.totalDebtors || 0} Debtors`;
+
+    // 2. Member Balances Preview Table
+    const balTbody = document.getElementById('ct-balances-tbody');
+    if (balTbody) {
+      const balances = data.personBalances || [];
+      if (balances.length === 0) {
+        balTbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:14px; color:var(--text-muted);">No members recorded in this batch.</td></tr>';
+      } else {
+        balTbody.innerHTML = balances.map(p => {
+          const bal = p.remainingBalance || 0;
+          let statusBadge = '<span class="badge" style="background:#e2e8f0; color:#475569;">Settled (0.00)</span>';
+          let balColor = 'var(--text-main)';
+          let balPrefix = '';
+
+          if (bal > 0.01) {
+            statusBadge = '<span class="badge badge-green">Advance / Creditor (+ Credit)</span>';
+            balColor = '#059669';
+            balPrefix = '+';
+          } else if (bal < -0.01) {
+            statusBadge = '<span class="badge badge-red">Payable / Debtor (- Due)</span>';
+            balColor = '#dc2626';
+          }
+
+          return `
+            <tr>
+              <td><strong>${escapeHtml(p.personName)}</strong></td>
+              <td style="text-align: right;">${formatCurrency(p.totalPaid || 0)}</td>
+              <td style="text-align: right;">${formatCurrency(p.totalShare || 0)}</td>
+              <td style="text-align: right; font-weight: 700; color: ${balColor};">${balPrefix}${formatCurrency(bal)}</td>
+              <td style="text-align: center;">${statusBadge}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+    }
+
+    // 3. Opening Adjustment Entries Table
+    const settTbody = document.getElementById('ct-settlements-tbody');
+    if (settTbody) {
+      const settlements = data.settlements || [];
+      if (settlements.length === 0) {
+        settTbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:14px; color:var(--text-muted);">All member balances are zero. No adjustment entries needed.</td></tr>';
+      } else {
+        settTbody.innerHTML = settlements.map((s, idx) => `
+          <tr>
+            <td><strong>#${idx + 1}</strong></td>
+            <td><strong style="color: #059669;">${escapeHtml(s.creditorName)}</strong> <span style="font-size: 10px; color: var(--text-muted);">(Payer)</span></td>
+            <td><strong style="color: #dc2626;">${escapeHtml(s.debtorName)}</strong> <span style="font-size: 10px; color: var(--text-muted);">(Share)</span></td>
+            <td style="text-align: right; font-weight: 700; color: #10b981;">${formatCurrency(s.amount)}</td>
+            <td style="font-size: 11px; color: var(--text-muted);">Auto Opening Balance B/F from ${escapeHtml(data.batch.name)}</td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    // 4. Next Batch Suggestion
+    const sug = data.suggestedNextBatch || {};
+    const nameInput = document.getElementById('ct-new-batch-name');
+    const fromInput = document.getElementById('ct-new-batch-from');
+    const toInput = document.getElementById('ct-new-batch-to');
+    if (nameInput) nameInput.value = sug.name || '';
+    if (fromInput) fromInput.value = sug.fromDate || '';
+    if (toInput) toInput.value = sug.toDate || '';
+
+    // 5. Existing batches dropdown
+    const existSelect = document.getElementById('ct-existing-batch-select');
+    if (existSelect) {
+      const others = data.otherBatches || [];
+      if (others.length === 0) {
+        existSelect.innerHTML = '<option value="">(No other batches available)</option>';
+      } else {
+        existSelect.innerHTML = others.map(ob => `<option value="${ob.id}">${escapeHtml(ob.name)} (${ob.status})</option>`).join('');
+      }
+    }
+
+    // Reset radio button to "new"
+    const newRadio = document.querySelector('input[name="ct-target-mode"][value="new"]');
+    if (newRadio) newRadio.checked = true;
+    handleTargetBatchModeChange();
+
+    // Reset checkbox
+    const tfCheck = document.getElementById('ct-transfer-checkbox');
+    if (tfCheck) tfCheck.checked = true;
+    toggleTransferOptions();
+
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (contentEl) contentEl.style.display = 'block';
+    if (confirmBtn) confirmBtn.disabled = false;
+  } catch (err) {
+    if (loadingEl) loadingEl.style.display = 'none';
+    alert('Error loading closing preview: ' + err.message);
+    closeCloseTransferModal();
+  }
+}
+
+function closeCloseTransferModal() {
+  const modal = document.getElementById('close-transfer-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function handleTargetBatchModeChange() {
+  const mode = document.querySelector('input[name="ct-target-mode"]:checked')?.value || 'new';
+  const newFields = document.getElementById('ct-new-batch-fields');
+  const existFields = document.getElementById('ct-existing-batch-fields');
+  if (mode === 'new') {
+    if (newFields) newFields.style.display = 'grid';
+    if (existFields) existFields.style.display = 'none';
+  } else {
+    if (newFields) newFields.style.display = 'none';
+    if (existFields) existFields.style.display = 'block';
+  }
+}
+
+function toggleTransferOptions() {
+  const checked = document.getElementById('ct-transfer-checkbox')?.checked;
+  const settTbody = document.getElementById('ct-settlements-tbody');
+  if (settTbody) {
+    settTbody.style.opacity = checked ? '1' : '0.35';
+  }
+}
+
+async function submitCloseAndTransfer() {
+  const batchId = document.getElementById('ct-batch-id').value;
+  if (!batchId) return;
+
+  const transferBalances = document.getElementById('ct-transfer-checkbox')?.checked ?? true;
+  const mode = document.querySelector('input[name="ct-target-mode"]:checked')?.value || 'new';
+
+  let nextBatch = null;
+  let nextBatchId = null;
+
+  if (mode === 'new') {
+    const name = document.getElementById('ct-new-batch-name').value.trim();
+    const fromDate = document.getElementById('ct-new-batch-from').value;
+    const toDate = document.getElementById('ct-new-batch-to').value;
+    if (!name || !fromDate || !toDate) {
+      alert('Please fill out Next Batch Name, From Date, and To Date.');
+      return;
+    }
+    nextBatch = { name, fromDate, toDate };
+  } else {
+    nextBatchId = document.getElementById('ct-existing-batch-select').value;
+    if (!nextBatchId) {
+      alert('Please select an existing batch or choose to create a new one.');
+      return;
+    }
+  }
+
+  const confirmMsg = transferBalances
+    ? `Are you sure you want to close this batch and carry forward balances into the next batch?\n\nThis will automatically generate opening adjustment entries in the new batch.`
+    : `Are you sure you want to close this batch without transferring balances?`;
+
+  if (!confirm(confirmMsg)) return;
+
+  const confirmBtn = document.getElementById('ct-confirm-btn');
+  const origText = confirmBtn ? confirmBtn.textContent : 'Confirm & Transfer Balances';
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Processing Transfer...';
+  }
+
+  try {
+    const res = await fetch(`/api/batches/${batchId}/close-and-transfer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transferBalances,
+        nextBatchId,
+        nextBatch
+      })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      alert(`✅ Success!\n\n${data.message}`);
+      closeCloseTransferModal();
+      closeBatchesModal();
+      await loadActiveBatch();
+      await loadBatchesTable();
+      if (state.activeView === 'dashboard') loadDashboard();
+      if (state.activeView === 'expenses') loadExpenses();
+    } else {
+      alert('Failed to close and transfer batch: ' + data.message);
+    }
+  } catch (err) {
+    alert('Error during batch transfer: ' + err.message);
+  } finally {
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = origText;
+    }
+  }
+}
+
+
+

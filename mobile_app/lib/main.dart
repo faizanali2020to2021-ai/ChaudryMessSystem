@@ -506,6 +506,19 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  void _openCloseTransferDialog(Map<String, dynamic> batch) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => CloseTransferBatchDialog(
+        api: widget.api,
+        batchId: batch['id'],
+        batchName: batch['name']?.toString() ?? 'Active Batch',
+        onSuccess: _load,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -531,41 +544,59 @@ class _DashboardPageState extends State<DashboardPage> {
                             side: const BorderSide(color: Color(0xFF6366F1), width: 1.2),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                            child: Row(
-                              children: [
-                                const CircleAvatar(
-                                  backgroundColor: Color(0xFF6366F1),
-                                  radius: 18,
-                                  child: Icon(Icons.calendar_month, color: Colors.white, size: 20),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () => _openCloseTransferDialog(_data!['activeBatch']),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              child: Row(
+                                children: [
+                                  const CircleAvatar(
+                                    backgroundColor: Color(0xFF6366F1),
+                                    radius: 18,
+                                    child: Icon(Icons.calendar_month, color: Colors.white, size: 20),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          _data!['activeBatch']['name'] ?? 'Active Batch',
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF4338CA)),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          '${_data!['activeBatch']['fromDate']} to ${_data!['activeBatch']['toDate']}',
+                                          style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
                                     children: [
-                                      Text(
-                                        _data!['activeBatch']['name'] ?? 'Active Batch',
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF4338CA)),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF10B981),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: const Text('ACTIVE', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                                       ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        '${_data!['activeBatch']['fromDate']} to ${_data!['activeBatch']['toDate']}',
-                                        style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                                      const SizedBox(height: 4),
+                                      const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.sync_alt, size: 12, color: Color(0xFF6366F1)),
+                                          SizedBox(width: 3),
+                                          Text('Transfer', style: TextStyle(color: Color(0xFF6366F1), fontSize: 10, fontWeight: FontWeight.bold)),
+                                        ],
                                       ),
                                     ],
                                   ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF10B981),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: const Text('ACTIVE', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -638,6 +669,465 @@ Widget _StatCard(String label, String value, IconData icon, Color color) {
       ),
     ),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Batch Close & Balance Transfer Dialog
+// ---------------------------------------------------------------------------
+class CloseTransferBatchDialog extends StatefulWidget {
+  final ApiService api;
+  final dynamic batchId;
+  final String batchName;
+  final VoidCallback onSuccess;
+
+  const CloseTransferBatchDialog({
+    super.key,
+    required this.api,
+    required this.batchId,
+    required this.batchName,
+    required this.onSuccess,
+  });
+
+  @override
+  State<CloseTransferBatchDialog> createState() => _CloseTransferBatchDialogState();
+}
+
+class _CloseTransferBatchDialogState extends State<CloseTransferBatchDialog> {
+  bool _loading = true;
+  String? _error;
+  Map<String, dynamic>? _preview;
+
+  late TextEditingController _nameController;
+  DateTime _fromDate = DateTime.now();
+  DateTime _toDate = DateTime.now();
+  bool _transferBalances = true;
+  bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController();
+    _fetchPreview();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _fetchPreview() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final res = await widget.api.get('/batches/${widget.batchId}/closing-preview');
+      if (res['success'] == true) {
+        _preview = res;
+        final sug = res['suggestedNextBatch'] as Map<String, dynamic>? ?? {};
+        _nameController.text = sug['name']?.toString() ?? 'Next Batch';
+        if (sug['fromDate'] != null) {
+          final parsedFrom = DateTime.tryParse(sug['fromDate'].toString());
+          if (parsedFrom != null) _fromDate = parsedFrom;
+        }
+        if (sug['toDate'] != null) {
+          final parsedTo = DateTime.tryParse(sug['toDate'].toString());
+          if (parsedTo != null) _toDate = parsedTo;
+        }
+      } else {
+        _error = res['message']?.toString() ?? 'Failed to load preview';
+      }
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _confirmAndSubmit() async {
+    if (_nameController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter next batch name')),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirm Batch Closing'),
+        content: Text(
+          _transferBalances
+              ? 'Close "${widget.batchName}" and transfer balances into "${_nameController.text.trim()}"?\n\nAuto opening entries will be created in the new batch.'
+              : 'Close "${widget.batchName}" without balance transfer?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF10B981),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Yes, Proceed'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    if (!mounted) return;
+
+    setState(() => _submitting = true);
+    try {
+      final payload = {
+        'transferBalances': _transferBalances,
+        'nextBatch': {
+          'name': _nameController.text.trim(),
+          'fromDate': DateFormat('yyyy-MM-dd').format(_fromDate),
+          'toDate': DateFormat('yyyy-MM-dd').format(_toDate),
+        },
+      };
+
+      final res = await widget.api.post('/batches/${widget.batchId}/close-and-transfer', payload);
+      if (!mounted) return;
+
+      if (res['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message']?.toString() ?? 'Batch closed successfully'),
+            backgroundColor: const Color(0xFF10B981),
+          ),
+        );
+        widget.onSuccess();
+        Navigator.pop(context);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message']?.toString() ?? 'Failed to close batch'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 700),
+        child: Column(
+          children: [
+            // Modal Header
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: Color(0xFF10B981), width: 2)),
+              ),
+              child: Row(
+                children: [
+                  const CircleAvatar(
+                    backgroundColor: Color(0xFF10B981),
+                    radius: 16,
+                    child: Icon(Icons.sync_alt, color: Colors.white, size: 18),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Close & Transfer Balances',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        Text(
+                          'Batch: ${widget.batchName}',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+
+            // Modal Body
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text('Error: $_error', style: const TextStyle(color: Colors.red)),
+                                const SizedBox(height: 12),
+                                ElevatedButton(onPressed: _fetchPreview, child: const Text('Retry')),
+                              ],
+                            ),
+                          ),
+                        )
+                      : _buildContent(),
+            ),
+
+            // Modal Footer
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: Colors.grey.shade300)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: _submitting ? null : () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    ),
+                    onPressed: _submitting ? null : _confirmAndSubmit,
+                    child: _submitting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Text('Confirm & Transfer', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent() {
+    final balances = (_preview?['personBalances'] as List<dynamic>? ?? []);
+    final settlements = (_preview?['settlements'] as List<dynamic>? ?? []);
+    final totalAmount = _preview?['totalTransferredAmount'] ?? 0;
+    final creditors = _preview?['totalCreditors'] ?? 0;
+    final debtors = _preview?['totalDebtors'] ?? 0;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // Summary Card
+        Card(
+          color: const Color(0xFF10B981).withValues(alpha: 0.08),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            side: const BorderSide(color: Color(0xFF10B981), width: 1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Total to Transfer', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    Text(
+                      formatCurrency(totalAmount),
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF059669)),
+                    ),
+                  ],
+                ),
+                Text(
+                  '$creditors Creditors · $debtors Debtors',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.blue.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+          ),
+          child: const Text(
+            '💡 Auto Entry System will create balanced opening adjustment entries in the new batch so all member balances continue seamlessly.',
+            style: TextStyle(fontSize: 11, height: 1.4),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        // Member Balances Section
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            initiallyExpanded: false,
+            tilePadding: EdgeInsets.zero,
+            title: Text(
+              '👤 Member Closing Balances (${balances.length})',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+            children: balances.map((b) {
+              final bal = double.tryParse(b['remainingBalance']?.toString() ?? '0') ?? 0;
+              final isCredit = bal > 0.01;
+              final isDebit = bal < -0.01;
+              final color = isCredit ? const Color(0xFF059669) : (isDebit ? Colors.red : Colors.grey);
+              final label = isCredit ? '+Credit' : (isDebit ? '-Due' : 'Settled');
+
+              return ListTile(
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                title: Text(b['personName']?.toString() ?? 'Member', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                subtitle: Text('Paid: ${formatCurrency(b['totalPaid'])} · Share: ${formatCurrency(b['totalShare'])}', style: const TextStyle(fontSize: 11)),
+                trailing: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: color.withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    '${isCredit ? "+" : ""}${formatCurrency(bal)} ($label)',
+                    style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+
+        // Auto Opening Adjustments Section
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            initiallyExpanded: false,
+            tilePadding: EdgeInsets.zero,
+            title: Text(
+              '⚡ Auto Adjustment Entries (${settlements.length})',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+            children: settlements.isEmpty
+                ? [
+                    const Padding(
+                      padding: EdgeInsets.all(8.0),
+                      child: Text('No adjustments needed. All balances are settled.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    )
+                  ]
+                : settlements.map((s) {
+                    return ListTile(
+                      dense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                      leading: const CircleAvatar(
+                        radius: 12,
+                        backgroundColor: Color(0xFF10B981),
+                        child: Icon(Icons.arrow_forward, size: 14, color: Colors.white),
+                      ),
+                      title: Text(
+                        '${s['creditorName']} ➔ ${s['debtorName']}',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: const Text('Auto Opening Balance B/F', style: TextStyle(fontSize: 10)),
+                      trailing: Text(
+                        formatCurrency(s['amount']),
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF059669), fontSize: 12),
+                      ),
+                    );
+                  }).toList(),
+          ),
+        ),
+
+        const Divider(height: 24),
+
+        // Next Batch Details Form
+        const Text(
+          '📦 Next Batch Configuration',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF6366F1)),
+        ),
+        const SizedBox(height: 8),
+
+        CheckboxListTile(
+          value: _transferBalances,
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: const Text('Generate opening adjustment entries in next batch', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          onChanged: (val) => setState(() => _transferBalances = val ?? true),
+        ),
+
+        const SizedBox(height: 6),
+        TextField(
+          controller: _nameController,
+          decoration: const InputDecoration(
+            labelText: 'Next Batch Name *',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.calendar_today, size: 14),
+                label: Text('From: ${DateFormat('dd/MM/yyyy').format(_fromDate)}', style: const TextStyle(fontSize: 11)),
+                onPressed: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _fromDate,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2035),
+                  );
+                  if (picked != null) setState(() => _fromDate = picked);
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.event, size: 14),
+                label: Text('To: ${DateFormat('dd/MM/yyyy').format(_toDate)}', style: const TextStyle(fontSize: 11)),
+                onPressed: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _toDate,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2035),
+                  );
+                  if (picked != null) setState(() => _toDate = picked);
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

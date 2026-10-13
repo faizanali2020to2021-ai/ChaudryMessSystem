@@ -29,9 +29,6 @@
         <div class="form-group" style="text-align: left; margin-bottom: 14px;">
           <label class="form-label" for="login-password">Password</label>
           <input type="password" id="login-password" class="form-control" style="width: 100%;" placeholder="Enter password" required autofocus>
-          <div id="login-hint" style="font-size: 12px; color: var(--text-muted); margin-top: 5px;">
-            Default password for Admin: <span style="font-family: monospace; font-weight: bold;">changeme123</span>
-          </div>
         </div>
 
         <div id="login-error" style="color: var(--red-text); background: var(--red-bg); padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 14px; display: none;"></div>
@@ -72,6 +69,18 @@
           <span class="nav-icon">➕</span>
           <span>Add Expense</span>
         </div>
+        <div class="nav-item" onclick="openPaymentModal()">
+          <span class="nav-icon">💳</span>
+          <span>Receive Payment</span>
+        </div>
+        <div class="nav-item" onclick="openOpeningAdjustmentModal()">
+          <span class="nav-icon">⚖️</span>
+          <span>Opening Adjustment</span>
+        </div>
+        <div class="nav-item" onclick="openBatchesModal()">
+          <span class="nav-icon">📅</span>
+          <span>Batches (بیچ)</span>
+        </div>
         <div class="nav-item" onclick="switchView('persons')">
           <span class="nav-icon">👥</span>
           <span>Persons</span>
@@ -81,6 +90,11 @@
           <span>Reports (6)</span>
         </div>
         
+        <div class="nav-item" onclick="toggleAIAssistant()" style="color: #6366f1; font-weight: 600;">
+          <span class="nav-icon">✨</span>
+          <span>AI Voice Assistant</span>
+        </div>
+
         <div class="nav-divider"></div>
         
         <div class="nav-item" id="nav-settings" onclick="switchView('settings')">
@@ -123,9 +137,13 @@
           </button>
           <h1 class="page-title" id="page-title">Dashboard</h1>
         </div>
-        <div class="top-bar-right">
+        <div class="top-bar-right" style="flex-wrap: wrap; gap: 8px;">
+          <button class="btn btn-sm" id="active-batch-pill" onclick="openBatchesModal()" style="background: rgba(99,102,241,0.12); color: #6366f1; border: 1px solid #6366f1; font-weight: 600; border-radius: 20px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;" title="Click to manage batches">📅 Batch: Loading...</button>
           <span id="user-role-badge" class="badge badge-green" style="font-size: 13px; font-weight: 700; padding: 6px 12px;">👑 Admin</span>
+          <button class="btn btn-sm" onclick="toggleAIAssistant()" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; border: none; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; box-shadow: 0 2px 6px rgba(99,102,241,0.35);">✨ AI Voice</button>
           <button class="btn btn-secondary btn-sm" onclick="toggleTheme()">🌓 Theme</button>
+          <button class="btn btn-warning btn-sm" style="background-color: #F59E0B; border-color: #F59E0B; color: white;" onclick="openOpeningAdjustmentModal()">⚖️ Opening Adjustment</button>
+          <button class="btn btn-success btn-sm" style="background-color: #10B981; border-color: #10B981; color: white;" onclick="openPaymentModal()">💳 Receive Payment</button>
           <button class="btn btn-primary btn-sm" onclick="openExpenseModal()">+ Add Expense</button>
         </div>
       </header>
@@ -175,6 +193,8 @@
               <option value="amount_asc">Amount: Low to High</option>
             </select>
 
+            <button class="btn btn-warning" style="background-color: #F59E0B; border-color: #F59E0B; color: white;" onclick="openOpeningAdjustmentModal()">⚖️ Opening Adjustment</button>
+            <button class="btn btn-success" style="background-color: #10B981; border-color: #10B981; color: white;" onclick="openPaymentModal()">💳 Receive Payment</button>
             <button class="btn btn-primary" onclick="openExpenseModal()">+ Add Expense</button>
           </div>
 
@@ -300,22 +320,23 @@
           </div>
 
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
-            <!-- Shop Address Settings -->
+            <!-- Company / Shop Identity Settings -->
             <div class="report-view-container">
-              <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Shop Identity & Address</h3>
-              <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">This address appears automatically in the header of all printed reports and PDFs.</p>
+              <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Company / Shop Identity</h3>
+              <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">This name and address appears on the top bar, sidebar, and in the header of all printed reports and PDFs.</p>
               
               <div class="form-group">
-                <label class="form-label">Shop / Mess Name</label>
-                <input type="text" id="settings-shop-name" class="form-control" style="width: 100%;" readonly>
+                <label class="form-label">Company / Shop / Mess Name</label>
+                <input type="text" id="settings-shop-name" class="form-control" style="width: 100%; font-weight: 600;" placeholder="e.g. Chaudry Mess System" required>
               </div>
 
               <div class="form-group">
-                <label class="form-label">Shop Address</label>
+                <label class="form-label">Company / Shop Address</label>
                 <textarea id="settings-shop-address" class="form-control" style="width: 100%; height: 80px;" placeholder="e.g. Near Civil Hospital, Main Road..."></textarea>
               </div>
 
-              <button class="btn btn-primary" onclick="saveShopAddress()">Save Shop Address</button>
+              <button class="btn btn-primary" onclick="saveShopIdentity()">Save Company / Shop Details</button>
+              <div id="settings-identity-msg" style="margin-top: 10px; font-size: 13px;"></div>
             </div>
 
             <!-- SQL Server 2014 Database & Backup -->
@@ -373,33 +394,88 @@
 
           <div class="form-group">
             <label class="form-label">Amount (Rs.)</label>
-            <input type="number" step="0.01" min="0.01" id="expense-input-amount" class="form-control" style="width: 100%; font-size: 18px; font-weight: bold;" placeholder="0.00" oninput="updateLiveSplitCalculation()" required>
+            <input type="number" step="0.01" min="0.01" id="expense-input-amount" class="form-control" style="width: 100%; font-size: 18px; font-weight: bold;" placeholder="0.00" oninput="updateLiveSplitCalculation(); updateCustomSplitSummary(); updateMultiPayerSummary();" required>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Paid By</label>
-            <select id="expense-input-paid-by" class="form-control" style="width: 100%;" required>
-              <!-- Populated dynamically -->
-            </select>
-          </div>
-
-          <div class="form-group">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-              <label class="form-label" style="margin-bottom: 0;">Split Among Members</label>
-              <div>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(true)">Select All</button>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(false)">Clear</button>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <label class="form-label" style="margin-bottom:0;">Paid By</label>
+              <!-- Payer mode toggle -->
+              <div class="split-mode-toggle">
+                <button type="button" id="payer-mode-single-btn" class="split-mode-btn active" onclick="setPayerMode('single')">💰 Single</button>
+                <button type="button" id="payer-mode-multi-btn" class="split-mode-btn" onclick="setPayerMode('multi')">👥 Multi</button>
               </div>
+            </div>
+
+            <!-- Single payer dropdown -->
+            <div id="payer-single-section">
+              <select id="expense-input-paid-by" class="form-control" style="width: 100%;" required>
+                <!-- Populated dynamically -->
+              </select>
+            </div>
+
+            <!-- Multi payer inputs -->
+            <div id="payer-multi-section" style="display:none;">
+              <div class="split-persons-box" id="multi-payer-list">
+                <!-- Dynamically populated -->
+              </div>
+              <div style="margin-top:8px; padding:8px 12px; border-radius:8px; font-size:13px; background:var(--bg-secondary);">
+                <div style="display:flex; justify-content:space-between;">
+                  <span>Total Expense:</span>
+                  <strong id="multi-payer-total-expense">Rs. 0.00</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span>Sum Entered:</span>
+                  <strong id="multi-payer-entered">Rs. 0.00</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:4px; font-weight:bold;">
+                  <span>Remaining:</span>
+                  <strong id="multi-payer-remaining" style="color:var(--danger)">Rs. 0.00</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <label class="form-label" style="margin-bottom: 0;">Split Among Members</label>
+              <!-- Split Mode Toggle -->
+              <div class="split-mode-toggle">
+                <button type="button" id="split-mode-equal-btn" class="split-mode-btn active" onclick="setSplitMode('equal')">⚖️ Equal</button>
+                <button type="button" id="split-mode-custom-btn" class="split-mode-btn" onclick="setSplitMode('custom')">✏️ Custom</button>
+              </div>
+            </div>
+
+            <!-- Select All / Clear (only in equal mode) -->
+            <div id="split-select-all-row" style="display: flex; gap: 6px; margin-bottom: 6px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(true)">Select All</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(false)">Clear</button>
             </div>
             
             <div class="split-persons-box" id="split-persons-list">
-              <!-- Dynamically populated checkboxes -->
+              <!-- Dynamically populated checkboxes or custom inputs -->
             </div>
 
-            <!-- Live split indicator -->
+            <!-- Live split indicator (equal mode) -->
             <div class="live-split-preview" id="live-split-preview">
               <span>Per Person Share:</span>
               <strong id="live-split-amount">Rs. 0.00</strong>
+            </div>
+
+            <!-- Custom split total validation (custom mode) -->
+            <div id="custom-split-summary" style="display:none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: var(--bg-secondary);">
+              <div style="display:flex; justify-content:space-between;">
+                <span>Total Expense:</span>
+                <strong id="custom-split-total-expense">Rs. 0.00</strong>
+              </div>
+              <div style="display:flex; justify-content:space-between;">
+                <span>Sum Entered:</span>
+                <strong id="custom-split-entered">Rs. 0.00</strong>
+              </div>
+              <div style="display:flex; justify-content:space-between; margin-top: 4px; font-weight: bold;">
+                <span>Remaining:</span>
+                <strong id="custom-split-remaining" style="color: var(--danger)">Rs. 0.00</strong>
+              </div>
             </div>
           </div>
 
@@ -409,6 +485,337 @@
           <button type="submit" class="btn btn-primary" id="expense-submit-btn">Save Expense</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- RECEIVE / RECORD PAYMENT MODAL -->
+  <div id="payment-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header" style="border-bottom: 2px solid #10B981;">
+        <h3 class="modal-title" id="payment-modal-title" style="color: #10B981;">💳 Receive / Record Payment</h3>
+        <button class="modal-close" onclick="closePaymentModal()">&times;</button>
+      </div>
+      <form id="payment-form" onsubmit="savePayment(event)">
+        <div class="modal-body">
+          
+          <div class="form-group">
+            <label class="form-label">Date</label>
+            <input type="date" id="payment-input-date" class="form-control" style="width: 100%;" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 600;">Paid By (کس نے دیا / ادا کیا)</label>
+            <select id="payment-input-paid-by" class="form-control" style="width: 100%;" required>
+              <!-- Populated dynamically -->
+            </select>
+            <div style="color: #10B981; font-size: 11px; margin-top: 4px;">✅ اس ممبر کی Paid رقم بڑھ جائے گی (Credit)</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 600;">Received By (کس کو ملا / وصول کیا)</label>
+            <select id="payment-input-received-by" class="form-control" style="width: 100%;" required>
+              <!-- Populated dynamically -->
+            </select>
+            <div style="color: var(--danger, #ef4444); font-size: 11px; margin-top: 4px;">📌 اس ممبر کا Expense / Share بڑھ جائے گا (Debit)</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Payment Amount (Rs.)</label>
+            <input type="number" step="0.01" min="0.01" id="payment-input-amount" class="form-control" style="width: 100%; font-size: 18px; font-weight: bold; color: #10B981;" placeholder="0.00" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Description / Notes (Optional)</label>
+            <input type="text" id="payment-input-desc" class="form-control" style="width: 100%;" placeholder="e.g. Cash settlement, Mess payment, etc.">
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closePaymentModal()">Cancel</button>
+          <button type="submit" class="btn btn-success" id="payment-submit-btn" style="background-color: #10B981; border-color: #10B981; color: white;">Save Payment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- OPENING ADJUSTMENT MODAL -->
+  <div id="opening-adjustment-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header" style="border-bottom: 2px solid #F59E0B;">
+        <h3 class="modal-title" id="opening-adjustment-modal-title" style="color: #F59E0B;">⚖️ Opening Adjustment (ابتدائی ایڈجسٹمنٹ)</h3>
+        <button class="modal-close" onclick="closeOpeningAdjustmentModal()">&times;</button>
+      </div>
+      <form id="opening-adjustment-form" onsubmit="saveOpeningAdjustment(event)">
+        <div class="modal-body">
+          
+          <div class="form-group">
+            <label class="form-label">Adjustment Date</label>
+            <input type="date" id="adj-input-date" class="form-control" style="width: 100%;" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 600;">Paid By / Adjusted By (کس نے دیا / کریڈٹ ممبر)</label>
+            <select id="adj-input-paid-by" class="form-control" style="width: 100%;" required>
+              <!-- Populated dynamically -->
+            </select>
+            <div style="color: #10B981; font-size: 11px; margin-top: 4px;">✅ اس ممبر کی Paid رقم / ایڈوانس بڑھ جائے گی (Credit)</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 600;">Received By / Adjusted For (کس کے ذمے / ڈیبٹ ممبر)</label>
+            <select id="adj-input-received-by" class="form-control" style="width: 100%;" required>
+              <!-- Populated dynamically -->
+            </select>
+            <div style="color: var(--danger, #ef4444); font-size: 11px; margin-top: 4px;">📌 اس ممبر کا Expense / شیئر بڑھ جائے گا (Debit)</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Adjustment Amount (Rs.)</label>
+            <input type="number" step="0.01" min="0.01" id="adj-input-amount" class="form-control" style="width: 100%; font-size: 18px; font-weight: bold; color: #F59E0B;" placeholder="0.00" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Description / Notes</label>
+            <input type="text" id="adj-input-desc" class="form-control" style="width: 100%;" placeholder="e.g. Previous month opening balance, Advance settlement">
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeOpeningAdjustmentModal()">Cancel</button>
+          <button type="submit" class="btn btn-warning" id="adj-submit-btn" style="background-color: #F59E0B; border-color: #F59E0B; color: white;">Save Opening Adjustment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- BATCHES MANAGEMENT MODAL -->
+  <div id="batches-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 720px;">
+      <div class="modal-header" style="border-bottom: 2px solid #6366F1;">
+        <h3 class="modal-title" style="color: #6366F1;">📅 Mess Batches (بیچ مینجمنٹ)</h3>
+        <button class="modal-close" onclick="closeBatchesModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        
+        <!-- Active Batch Quick Card Banner -->
+        <div id="active-batch-banner-card" style="display: none; background: linear-gradient(135deg, rgba(99,102,241,0.08), rgba(16,185,129,0.08)); border: 1px solid rgba(99,102,241,0.25); border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 16px; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: #6366f1; letter-spacing: 0.5px;">Current Active Batch (فعال بیچ)</div>
+            <div id="active-batch-banner-name" style="font-size: 15px; font-weight: 700; color: var(--text-main); margin-top: 2px;">-</div>
+            <div id="active-batch-banner-dates" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;"></div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-sm" id="active-batch-close-transfer-btn" onclick="triggerCloseTransferCurrent()" style="background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(16,185,129,0.3); cursor: pointer; padding: 7px 14px; border-radius: 6px;">
+              🔄 Close & Transfer Balances
+            </button>
+          </div>
+        </div>
+
+        <!-- Add / Edit Batch Form Card -->
+        <div style="background: var(--zebra); border: 1px solid var(--card-border); border-radius: var(--radius-md); padding: 16px; margin-bottom: 20px;">
+          <h4 id="batch-form-title" style="font-size: 14px; margin-bottom: 12px; font-weight: 700;">➕ Add / Edit Batch</h4>
+          <form id="batch-form" onsubmit="saveBatch(event)">
+            <input type="hidden" id="batch-edit-id" value="">
+            <div style="display: grid; grid-template-columns: 2fr 1.2fr 1.2fr 1.2fr; gap: 10px; align-items: end;">
+              <div>
+                <label class="form-label" style="font-size: 12px;">Batch Name</label>
+                <input type="text" id="batch-input-name" class="form-control" placeholder="e.g. Batch: 08 Oct - 31 Oct" required>
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 12px;">From Date</label>
+                <input type="date" id="batch-input-from" class="form-control" required>
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 12px;">To Date</label>
+                <input type="date" id="batch-input-to" class="form-control" required>
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 12px;">Status</label>
+                <select id="batch-input-status" class="form-control">
+                  <option value="active">Active (Current)</option>
+                  <option value="closed">Closed</option>
+                </select>
+              </div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="resetBatchForm()">Reset Form</button>
+              <button type="submit" class="btn btn-primary btn-sm" id="batch-submit-btn">Save Batch</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Batches Table List -->
+        <div style="font-weight: 700; font-size: 13px; margin-bottom: 8px;">📋 All Batches History:</div>
+        <div class="table-container" style="max-height: 280px; overflow-y: auto;">
+          <table class="app-table" id="batches-table">
+            <thead>
+              <tr>
+                <th>Batch Name</th>
+                <th>From Date</th>
+                <th>To Date</th>
+                <th>Status</th>
+                <th>Entries</th>
+                <th>Total Expense</th>
+                <th style="text-align: center;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="batches-table-body">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeBatchesModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CLOSE & TRANSFER BALANCES MODAL -->
+  <div id="close-transfer-modal" class="modal-overlay" style="display: none; z-index: 1050;">
+    <div class="modal-content" style="max-width: 840px; max-height: 92vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="border-bottom: 2px solid #10b981; background: linear-gradient(135deg, rgba(16,185,129,0.06), transparent);">
+        <h3 class="modal-title" style="color: #059669; display: flex; align-items: center; gap: 8px;">
+          <span>🔄</span> Close Batch & Transfer Balances (بیچ بند اور بیلنس ٹرانسفر)
+        </h3>
+        <button class="modal-close" onclick="closeCloseTransferModal()">&times;</button>
+      </div>
+      
+      <div class="modal-body" style="overflow-y: auto; padding: 20px;">
+        <input type="hidden" id="ct-batch-id" value="">
+        
+        <!-- Batch to Close Info Banner -->
+        <div style="background: var(--zebra); border: 1px solid var(--card-border); border-radius: var(--radius-md); padding: 14px 18px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Closing Batch:</span>
+            <h4 id="ct-old-batch-name" style="margin: 2px 0 0 0; font-size: 16px; font-weight: 700; color: var(--text-main);">-</h4>
+            <div id="ct-old-batch-dates" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">-</div>
+          </div>
+          <div style="text-align: right;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Total Transferred:</span>
+            <div id="ct-total-transferred-stat" style="font-size: 20px; font-weight: 800; color: #10b981;">Rs. 0.00</div>
+            <div id="ct-members-stat" style="font-size: 11px; color: var(--text-muted);">0 Creditors · 0 Debtors</div>
+          </div>
+        </div>
+
+        <!-- Explainer alert -->
+        <div style="background: rgba(16,185,129,0.08); border-left: 4px solid #10b981; border-radius: 4px; padding: 12px 14px; margin-bottom: 18px; font-size: 13px; line-height: 1.5; color: var(--text-main);">
+          💡 <strong>Auto Entry System:</strong> Closing balances of this batch will be automatically transferred into the next batch. The system calculates each member's net balance (+Advance / -Payable) and generates opening adjustment expense entries in the new batch, tagged with the new batch ID.
+        </div>
+
+        <!-- Loading spinner for preview -->
+        <div id="ct-loading" style="display: none; text-align: center; padding: 30px; font-size: 14px; color: var(--text-muted);">
+          ⏳ Computing closing balances and settlement adjustments...
+        </div>
+
+        <div id="ct-content-area">
+          <!-- Section 1: Member Balances Preview -->
+          <div style="margin-bottom: 20px;">
+            <div style="font-weight: 700; font-size: 13px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+              <span>👤 Member Closing Balances:</span>
+              <span style="font-size: 12px; color: var(--text-muted);">Net balance at close of this batch</span>
+            </div>
+            <div class="table-container" style="max-height: 190px; overflow-y: auto; border: 1px solid var(--card-border); border-radius: var(--radius-sm);">
+              <table class="app-table" style="font-size: 13px; margin: 0;">
+                <thead>
+                  <tr>
+                    <th>Member</th>
+                    <th style="text-align: right;">Total Paid</th>
+                    <th style="text-align: right;">Total Share</th>
+                    <th style="text-align: right;">Closing Balance</th>
+                    <th style="text-align: center;">Status</th>
+                  </tr>
+                </thead>
+                <tbody id="ct-balances-tbody">
+                  <!-- Populated dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Section 2: Auto Opening Adjustment Entries Preview -->
+          <div style="margin-bottom: 20px;">
+            <div style="font-weight: 700; font-size: 13px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+              <span>⚡ Opening Adjustment Entries (Auto-Generated in New Batch):</span>
+              <span class="badge badge-green" style="font-size: 11px;">Balanced Double-Entry</span>
+            </div>
+            <div class="table-container" style="max-height: 180px; overflow-y: auto; border: 1px solid var(--card-border); border-radius: var(--radius-sm);">
+              <table class="app-table" style="font-size: 12px; margin: 0;">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Creditor (Advance / Receive)</th>
+                    <th>Debtor (Payable / Due)</th>
+                    <th style="text-align: right;">Amount</th>
+                    <th>Auto Entry Description in New Batch</th>
+                  </tr>
+                </thead>
+                <tbody id="ct-settlements-tbody">
+                  <!-- Populated dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Section 3: Next Batch Configuration -->
+          <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius-md); padding: 16px;">
+            <div style="font-weight: 700; font-size: 14px; margin-bottom: 12px; color: #6366f1;">
+              📦 Next Batch Details (نیا بیچ)
+            </div>
+
+            <div style="margin-bottom: 12px;">
+              <label style="display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; cursor: pointer;">
+                <input type="checkbox" id="ct-transfer-checkbox" checked onchange="toggleTransferOptions()">
+                Auto-generate opening adjustment entries in the next batch
+              </label>
+            </div>
+
+            <div id="ct-next-batch-mode-container" style="display: flex; gap: 16px; margin-bottom: 14px; font-size: 13px;">
+              <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                <input type="radio" name="ct-target-mode" value="new" checked onchange="handleTargetBatchModeChange()">
+                Create New Batch (نیا بیچ بنائیں)
+              </label>
+              <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                <input type="radio" name="ct-target-mode" value="existing" onchange="handleTargetBatchModeChange()">
+                Transfer to Existing Batch (پہلے سے موجود بیچ)
+              </label>
+            </div>
+
+            <!-- New Batch Form Fields -->
+            <div id="ct-new-batch-fields" style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px;">
+              <div>
+                <label class="form-label" style="font-size: 12px;">Next Batch Name *</label>
+                <input type="text" id="ct-new-batch-name" class="form-control" placeholder="e.g. Batch: 01 Nov 2026 - 30 Nov 2026">
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 12px;">From Date *</label>
+                <input type="date" id="ct-new-batch-from" class="form-control">
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 12px;">To Date *</label>
+                <input type="date" id="ct-new-batch-to" class="form-control">
+              </div>
+            </div>
+
+            <!-- Existing Batch Select Field -->
+            <div id="ct-existing-batch-fields" style="display: none;">
+              <label class="form-label" style="font-size: 12px;">Select Target Batch *</label>
+              <select id="ct-existing-batch-select" class="form-control">
+                <!-- Populated dynamically -->
+              </select>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button type="button" class="btn btn-secondary" onclick="closeCloseTransferModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" id="ct-confirm-btn" onclick="submitCloseAndTransfer()" style="background: linear-gradient(135deg, #10b981, #059669); border: none; font-weight: 600; padding: 8px 22px; cursor: pointer; border-radius: 6px;">
+          Confirm & Transfer Balances
+        </button>
+      </div>
     </div>
   </div>
 
@@ -511,6 +918,86 @@
     </div>
   </div>
 
-  <script src="/js/app.js"></script>
+  <!-- FLOATING AI VOICE ASSISTANT FAB BUTTON -->
+  <button id="ai-voice-fab" class="ai-fab-btn" onclick="toggleAIAssistant()" title="Open AI Voice Assistant">
+    <div class="ai-fab-pulse"></div>
+    <span class="ai-fab-icon">✨</span>
+    <span class="ai-fab-label">AI Voice</span>
+  </button>
+
+  <!-- AI VOICE ASSISTANT MODAL / CARD -->
+  <div id="ai-assistant-modal" class="modal-overlay" style="display: none;" onclick="handleAIOverlayClick(event)">
+    <div class="ai-assistant-card" id="ai-card-content">
+      
+      <!-- AI Modal Header -->
+      <div class="ai-header">
+        <div class="ai-header-left">
+          <div class="ai-header-icon-circle">✨</div>
+          <div>
+            <h3 class="ai-header-title">AI Voice Assistant</h3>
+            <span class="ai-sub-badge">⚡ Zero-Install • Smart Mess AI</span>
+          </div>
+        </div>
+        <div class="ai-header-right">
+          <button type="button" class="ai-lang-btn" id="ai-lang-btn" onclick="toggleAILanguage()" title="Switch Language">
+            🇵🇰 Urdu / EN
+          </button>
+          <button type="button" class="modal-close" onclick="closeAIAssistant()">&times;</button>
+        </div>
+      </div>
+
+      <div class="ai-body">
+        <!-- Visualizer Wave Animation when listening -->
+        <div class="ai-visualizer-container" id="ai-visualizer">
+          <div class="ai-wave-bar"></div>
+          <div class="ai-wave-bar"></div>
+          <div class="ai-wave-bar"></div>
+          <div class="ai-wave-bar"></div>
+          <div class="ai-wave-bar"></div>
+          <div class="ai-wave-bar"></div>
+          <div class="ai-wave-bar"></div>
+        </div>
+
+        <!-- Live Status & Transcript Display -->
+        <div class="ai-transcript-box" id="ai-transcript-box">
+          <div class="ai-status-indicator" id="ai-status-text">مائیک بٹن دبائیں یا بولیں: "نیا خرچہ کھولو" / "Open Expense"</div>
+          <div class="ai-live-text" id="ai-live-text">"بولنے کا انتظار ہے..."</div>
+        </div>
+
+        <!-- Action Feedback Banner -->
+        <div class="ai-feedback-banner" id="ai-feedback-banner" style="display: none;"></div>
+
+        <!-- Big Mic / Listen Button -->
+        <div class="ai-mic-section">
+          <button type="button" class="ai-big-mic-btn" id="ai-big-mic-btn" onclick="toggleVoiceListening()">
+            <span id="ai-mic-icon" style="font-size: 32px;">🎙️</span>
+          </button>
+          <div class="ai-mic-hint" id="ai-mic-hint">مائیک پر کلک کر کے بولنا شروع کریں</div>
+        </div>
+
+        <!-- Text command fallback input -->
+        <form class="ai-manual-input-form" onsubmit="handleManualAICommand(event)">
+          <input type="text" id="ai-manual-command-input" class="form-control" placeholder="یا یہاں لکھ کر Enter دبائیں (مثلاً: 500 Ali Breakfast)...">
+          <button type="submit" class="btn btn-primary" style="white-space: nowrap; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none;">Send ⚡</button>
+        </form>
+
+        <!-- Command Quick Suggestions Chips -->
+        <div class="ai-suggestions-header">
+          <span>💡 فوری وائس کمانڈز (بولیں یا کلک کریں):</span>
+        </div>
+        <div class="ai-suggestions-grid">
+          <button type="button" class="ai-chip" onclick="executeAICommand('نیا خرچہ فارم اوپن کرو')">➕ نیا خرچہ فارم کھولو</button>
+          <button type="button" class="ai-chip" onclick="executeAICommand('پیمنٹ وصولی فارم اوپن کرو')">💳 پیمنٹ وصولی فارم</button>
+          <button type="button" class="ai-chip" onclick="executeAICommand('رپورٹس اوپن کرو')">📊 تمام رپورٹس دکھاؤ</button>
+          <button type="button" class="ai-chip" onclick="executeAICommand('رپورٹ پرنٹ کرو')">🖨️ رپورٹ پرنٹ کرو</button>
+          <button type="button" class="ai-chip" onclick="executeAICommand('علی نے 500 روپے کا ناشتہ کروایا')">🍳 علی نے 500 کا ناشتہ کروایا</button>
+          <button type="button" class="ai-chip" onclick="executeAICommand('ڈیش بورڈ دکھاؤ')">🏠 ڈیش بورڈ</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js?v=2.1.0"></script>
 </body>
 </html>
