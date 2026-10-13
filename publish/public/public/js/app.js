@@ -2702,6 +2702,7 @@ async function loadBatchesTable() {
             <button class="btn btn-secondary btn-sm" onclick="toggleBatchStatus(${b.id}, 'closed')" style="font-size: 11px; padding: 4px 8px;">Close Only</button>
           `
         : `
+            <button class="btn btn-sm" onclick="openCloseTransferModal(${b.id})" style="background: rgba(16,185,129,0.12); color: #059669; border: 1px solid #10b981; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 4px; margin-right: 4px;" title="Transfer balances from this batch">🔄 Transfer Balances</button>
             <button class="btn btn-secondary btn-sm" onclick='editBatch(${JSON.stringify(b).replace(/'/g, "&#39;")})' style="font-size: 11px; padding: 4px 8px;">Edit</button>
             <button class="btn btn-primary btn-sm" onclick="toggleBatchStatus(${b.id}, 'active')" style="font-size: 11px; padding: 4px 8px;">Set Active</button>
           `;
