@@ -986,8 +986,16 @@ body.sidebar-collapsed .sidebar {
     print-color-adjust: exact !important;
   }
   @page {
-    size: A4;
-    margin: 1.5cm;
+    size: A4 portrait;
+    margin: 1cm;
+  }
+  body.print-landscape @page,
+  @page landscape-page {
+    size: A4 landscape;
+    margin: 1cm;
+  }
+  body.print-landscape {
+    max-width: 100% !important;
   }
 }
 

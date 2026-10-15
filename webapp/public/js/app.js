@@ -519,27 +519,39 @@ function populatePersonSelects() {
 
 async function populateBatchFilter() {
   const batchSelect = document.getElementById('expense-filter-batch');
-  if (!batchSelect) return;
+  const reportBatchSelect = document.getElementById('report-batch-select');
+  if (!batchSelect && !reportBatchSelect) return;
 
   try {
     const res = await fetch('/api/batches');
     const data = await res.json();
     if (!data.success) return;
 
-    const currentVal = batchSelect.value;
     const batches = data.batches || [];
-
-    batchSelect.innerHTML = '<option value="">All Batches (تمام بیچز)</option>' +
+    const optionsHtml = '<option value="">All Batches (تمام بیچز)</option>' +
       batches.map(b => {
         const active = b.status === 'active' ? ' ✅' : ' 🔒';
         return `<option value="${b.id}">${b.name}${active}</option>`;
       }).join('');
 
-    // Restore selection if still exists, else default to active batch
-    if (currentVal && batches.find(b => String(b.id) === currentVal)) {
-      batchSelect.value = currentVal;
-    } else if (state.activeBatch && state.activeBatch.id) {
-      batchSelect.value = String(state.activeBatch.id);
+    if (batchSelect) {
+      const currentVal = batchSelect.value;
+      batchSelect.innerHTML = optionsHtml;
+      if (currentVal && batches.find(b => String(b.id) === currentVal)) {
+        batchSelect.value = currentVal;
+      } else if (state.activeBatch && state.activeBatch.id) {
+        batchSelect.value = String(state.activeBatch.id);
+      }
+    }
+
+    if (reportBatchSelect) {
+      const currentVal = reportBatchSelect.value;
+      reportBatchSelect.innerHTML = optionsHtml;
+      if (currentVal && batches.find(b => String(b.id) === currentVal)) {
+        reportBatchSelect.value = currentVal;
+      } else if (state.activeBatch && state.activeBatch.id) {
+        reportBatchSelect.value = String(state.activeBatch.id);
+      }
     }
   } catch (err) {
     console.warn('Failed to populate batch filter:', err);
@@ -1390,28 +1402,34 @@ function switchReportTab(tabName) {
 
   const dateGroup = document.getElementById('filter-date-group');
   const personGroup = document.getElementById('filter-person-group');
+  const batchGroup = document.getElementById('filter-batch-group');
   const waBtn = document.getElementById('report-wa-share-btn');
 
   // Adjust filters visibility per report type
   if (tabName === 'total-expense' || tabName === 'paid-by-person') {
     dateGroup.style.display = 'flex';
     personGroup.style.display = 'none';
+    if (batchGroup) batchGroup.style.display = 'none';
     waBtn.style.display = 'none';
   } else if (tabName === 'person-ledger' || tabName === 'person-detail-ledger') {
     dateGroup.style.display = 'none';
     personGroup.style.display = 'flex';
+    if (batchGroup) batchGroup.style.display = 'none';
     waBtn.style.display = 'inline-flex';
   } else if (tabName === 'account-ledger') {
     dateGroup.style.display = 'flex';
     personGroup.style.display = 'flex';
+    if (batchGroup) batchGroup.style.display = 'flex';
     waBtn.style.display = 'inline-flex';
   } else if (tabName === 'day-wise') {
     dateGroup.style.display = 'flex';
     personGroup.style.display = 'flex';
+    if (batchGroup) batchGroup.style.display = 'none';
     waBtn.style.display = 'none';
   } else if (tabName === 'group-summary') {
     dateGroup.style.display = 'none';
     personGroup.style.display = 'none';
+    if (batchGroup) batchGroup.style.display = 'none';
     waBtn.style.display = 'none';
   }
 
@@ -1423,6 +1441,7 @@ async function generateActiveReport() {
   const fromStr = document.getElementById('report-from-date').value;
   const toStr = document.getElementById('report-to-date').value;
   const personId = document.getElementById('report-person-select').value;
+  const batchId = document.getElementById('report-batch-select')?.value || '';
 
   const fromMillis = new Date(fromStr + 'T00:00:00').getTime();
   const toMillis = new Date(toStr + 'T23:59:59.999').getTime();
@@ -1438,7 +1457,7 @@ async function generateActiveReport() {
   } else if (tab === 'person-detail-ledger') {
     await renderPersonDetailLedgerReport(personId);
   } else if (tab === 'account-ledger') {
-    await renderAccountLedgerReport(personId, fromMillis, toMillis);
+    await renderAccountLedgerReport(personId, fromMillis, toMillis, batchId);
   } else if (tab === 'day-wise') {
     await renderDayWiseReport(fromMillis, toMillis, personId);
   } else if (tab === 'group-summary') {
@@ -1635,19 +1654,21 @@ async function renderPersonDetailLedgerReport(personId) {
 }
 
 // 4b. Person Account Ledger Report (Opening Balance -> Expenses [Debit] -> Payments [Credit] -> Net Balance)
-async function renderAccountLedgerReport(personId, fromMillis, toMillis) {
+async function renderAccountLedgerReport(personId, fromMillis, toMillis, batchId) {
   if (!personId) return;
 
   let url = `/api/reports/account-ledger?personId=${personId}`;
   if (fromMillis) url += `&fromMillis=${fromMillis}`;
   if (toMillis) url += `&toMillis=${toMillis}`;
+  if (batchId) url += `&batchId=${batchId}`;
 
   const res = await fetch(url);
   const data = await res.json();
   if (!data.success) return;
   state.currentReportData = data;
 
-  const subtitle = `Account Ledger (کھاتہ): ${data.personName}`;
+  const batchNameStr = data.batchName ? ` [${data.batchName}]` : '';
+  const subtitle = `Account Ledger (کھاتہ): ${data.personName}${batchNameStr}`;
   document.getElementById('report-doc-subtitle').textContent = subtitle;
 
   const isNetReceivable = data.netClosingBalance >= 0;
@@ -1916,6 +1937,24 @@ async function renderGroupSummaryReport() {
 // Report Actions: Print, CSV, WhatsApp
 // -----------------------------------------------------------------------------
 function printReport() {
+  const isLandscape = state.activeReportTab === 'account-ledger' || state.activeReportTab === 'person-detail-ledger';
+
+  // Inject or update dynamic @page print style
+  let printStyle = document.getElementById('dynamic-print-page-style');
+  if (!printStyle) {
+    printStyle = document.createElement('style');
+    printStyle.id = 'dynamic-print-page-style';
+    document.head.appendChild(printStyle);
+  }
+
+  if (isLandscape) {
+    document.body.classList.add('print-landscape');
+    printStyle.textContent = '@media print { @page { size: A4 landscape !important; margin: 0.8cm !important; } }';
+  } else {
+    document.body.classList.remove('print-landscape');
+    printStyle.textContent = '@media print { @page { size: A4 portrait !important; margin: 1cm !important; } }';
+  }
+
   window.print();
 }
 

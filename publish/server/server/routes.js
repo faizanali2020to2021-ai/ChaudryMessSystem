@@ -1782,12 +1782,69 @@ router.get('/reports/account-ledger', async (req, res) => {
 
     const fromM = fromMillis ? parseInt(fromMillis, 10) : null;
     const toM = toMillis ? parseInt(toMillis, 10) : null;
-    const bId = batchId && !isNaN(parseInt(batchId, 10)) ? parseInt(batchId, 10) : null;
+    let targetBatchId = bId;
+    let targetBatchName = null;
 
-    // 1. Calculate Opening Balance before fromM or before selected batch
+    // If no specific batchId provided and no date range provided, default to active batch
+    if (!targetBatchId && !fromM && !toM) {
+      const bRes = await pool.request().query("SELECT TOP 1 id, name, fromDate, toDate FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
+      if (bRes.recordset.length > 0) {
+        targetBatchId = bRes.recordset[0].id;
+        targetBatchName = bRes.recordset[0].name;
+      }
+    } else if (targetBatchId) {
+      const bRes = await pool.request().input('bId', sql.BigInt, targetBatchId).query("SELECT name FROM dbo.Batches WHERE id = @bId");
+      if (bRes.recordset.length > 0) {
+        targetBatchName = bRes.recordset[0].name;
+      }
+    }
+
+    // 1. Calculate Opening Balance
     let openingBalance = 0;
 
-    if (fromM) {
+    if (targetBatchId) {
+      // Prior debits from closed batches with id < targetBatchId
+      const priorShareReq = pool.request()
+        .input('personId', sql.BigInt, pId)
+        .input('targetBId', sql.BigInt, targetBatchId);
+      const priorShareRes = await priorShareReq.query(`
+        SELECT COALESCE(SUM(es.shareAmount), 0) AS totalShare
+        FROM dbo.ExpenseShares es
+        JOIN dbo.Expenses e ON e.id = es.expenseId
+        WHERE es.personId = @personId AND e.batchId < @targetBId
+      `);
+      const priorDebit = parseFloat(priorShareRes.recordset[0].totalShare) || 0;
+
+      // Prior credits from closed batches with id < targetBatchId
+      const priorPaidReq = pool.request()
+        .input('personId', sql.BigInt, pId)
+        .input('targetBId', sql.BigInt, targetBatchId);
+      const priorPaidRes = await priorPaidReq.query(`
+        SELECT COALESCE(SUM(ep.amountPaid), 0) AS totalPaid
+        FROM dbo.ExpensePayers ep
+        JOIN dbo.Expenses e ON e.id = ep.expenseId
+        WHERE ep.personId = @personId AND e.batchId < @targetBId
+      `);
+      const priorCredit = parseFloat(priorPaidRes.recordset[0].totalPaid) || 0;
+
+      // Note: If balances were already transferred via Opening Adjustment entries into targetBatchId,
+      // those entries will be part of targetBatchId transactions, so we don't double count prior batches
+      // If auto-opening adjustment entries exist in targetBatchId, openingBalance B/F is 0
+      const checkAdjReq = pool.request()
+        .input('personId', sql.BigInt, pId)
+        .input('targetBId', sql.BigInt, targetBatchId);
+      const checkAdjRes = await checkAdjReq.query(`
+        SELECT COUNT(*) AS cnt
+        FROM dbo.Expenses e
+        JOIN dbo.ExpenseShares es ON es.expenseId = e.id AND es.personId = @personId
+        WHERE e.batchId = @targetBId AND (e.category = 'Opening Adjustment' OR e.description LIKE 'Auto Opening Balance%')
+      `);
+      const hasAutoAdj = parseInt(checkAdjRes.recordset[0].cnt, 10) > 0;
+
+      if (!hasAutoAdj) {
+        openingBalance = Math.round((priorCredit - priorDebit) * 100) / 100;
+      }
+    } else if (fromM) {
       // Prior debits (share/expenses allocated before fromM)
       const priorShareReq = pool.request()
         .input('personId', sql.BigInt, pId)
@@ -1835,6 +1892,10 @@ router.get('/reports/account-ledger', async (req, res) => {
 
     const txReq = pool.request().input('personId', sql.BigInt, pId);
 
+    if (targetBatchId) {
+      txReq.input('targetBId', sql.BigInt, targetBatchId);
+      txQuery += ` AND e.batchId = @targetBId`;
+    }
     if (fromM) {
       txReq.input('fromM', sql.BigInt, fromM);
       txQuery += ` AND e.expenseDate >= @fromM`;
@@ -1842,10 +1903,6 @@ router.get('/reports/account-ledger', async (req, res) => {
     if (toM) {
       txReq.input('toM', sql.BigInt, toM);
       txQuery += ` AND e.expenseDate <= @toM`;
-    }
-    if (bId) {
-      txReq.input('bId', sql.BigInt, bId);
-      txQuery += ` AND e.batchId = @bId`;
     }
 
     txQuery += ` ORDER BY e.expenseDate ASC, e.id ASC`;
@@ -1883,6 +1940,8 @@ router.get('/reports/account-ledger', async (req, res) => {
       shopName: shop.shopName,
       shopAddress: shop.shopAddress,
       companyId: shop.companyId || 1,
+      batchId: targetBatchId,
+      batchName: targetBatchName,
       personId: pId,
       personName: person.name,
       mobileNumber: person.mobileNumber || '',
