@@ -1745,9 +1745,9 @@ async function renderAccountLedgerReport(personId, fromMillis, toMillis, batchId
         <tbody>
           <!-- 1. Opening Balance Row -->
           <tr style="background: rgba(99, 102, 241, 0.08); font-weight: 700;">
-            <td>${formatDate(fromMillis || Date.now())}</td>
+            <td>${formatDate(data.batchFromDate || fromMillis || Date.now())}</td>
             <td><strong>🏁 Opening Balance B/F (سابقہ بقایا)</strong></td>
-            <td>—</td>
+            <td>${data.batchName || '—'}</td>
             <td style="text-align: right; color: #b91c1c;">${opBal < 0 ? formatCurrency(Math.abs(opBal)) : '—'}</td>
             <td style="text-align: right; color: #047857;">${opBal > 0 ? formatCurrency(opBal) : '—'}</td>
             <td style="text-align: right; font-weight: 800; color: ${isOpPos ? 'var(--green-text)' : 'var(--red-text)'};">

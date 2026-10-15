@@ -1842,97 +1842,85 @@ router.get('/reports/account-ledger', async (req, res) => {
     let targetBatchName = null;
 
     // If no specific batchId provided and not explicitly requested 'all', default to active batch
+    let targetBatchFromDate = null;
     const isExplicitAll = batchId === 'all';
     if (!targetBatchId && !isExplicitAll) {
       const bRes = await pool.request().query("SELECT TOP 1 id, name, fromDate, toDate FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
       if (bRes.recordset.length > 0) {
         targetBatchId = bRes.recordset[0].id;
         targetBatchName = bRes.recordset[0].name;
+        targetBatchFromDate = bRes.recordset[0].fromDate;
       }
     } else if (targetBatchId) {
-      const bRes = await pool.request().input('bId', sql.BigInt, targetBatchId).query("SELECT name FROM dbo.Batches WHERE id = @bId");
+      const bRes = await pool.request().input('bId', sql.BigInt, targetBatchId).query("SELECT name, fromDate, toDate FROM dbo.Batches WHERE id = @bId");
       if (bRes.recordset.length > 0) {
         targetBatchName = bRes.recordset[0].name;
+        targetBatchFromDate = bRes.recordset[0].fromDate;
       }
     }
 
-    // 1. Calculate Opening Balance
+    // 1. Calculate Opening Balance (to be shown exclusively in the 1st row of the ledger)
     let openingBalance = 0;
 
     if (targetBatchId) {
-      // Prior debits from closed batches with id < targetBatchId
-      const priorShareReq = pool.request()
+      // Check if opening entries exist in targetBatchId itself
+      const currentBatchAdjReq = pool.request()
         .input('personId', sql.BigInt, pId)
         .input('targetBId', sql.BigInt, targetBatchId);
-      const priorShareRes = await priorShareReq.query(`
-        SELECT COALESCE(SUM(es.shareAmount), 0) AS totalShare
-        FROM dbo.ExpenseShares es
-        JOIN dbo.Expenses e ON e.id = es.expenseId
-        WHERE es.personId = @personId AND e.batchId < @targetBId
-      `);
-      const priorDebit = parseFloat(priorShareRes.recordset[0].totalShare) || 0;
-
-      // Prior credits from closed batches with id < targetBatchId
-      const priorPaidReq = pool.request()
-        .input('personId', sql.BigInt, pId)
-        .input('targetBId', sql.BigInt, targetBatchId);
-      const priorPaidRes = await priorPaidReq.query(`
-        SELECT COALESCE(SUM(ep.amountPaid), 0) AS totalPaid
-        FROM dbo.ExpensePayers ep
-        JOIN dbo.Expenses e ON e.id = ep.expenseId
-        WHERE ep.personId = @personId AND e.batchId < @targetBId
-      `);
-      const priorCredit = parseFloat(priorPaidRes.recordset[0].totalPaid) || 0;
-
-      // Note: If balances were already transferred via Opening Adjustment entries into targetBatchId,
-      // those entries will be part of targetBatchId transactions, so we don't double count prior batches
-      // If auto-opening adjustment entries exist in targetBatchId, openingBalance B/F is 0
-      const checkAdjReq = pool.request()
-        .input('personId', sql.BigInt, pId)
-        .input('targetBId', sql.BigInt, targetBatchId);
-      const checkAdjRes = await checkAdjReq.query(`
-        SELECT COUNT(*) AS cnt
+      const currentBatchAdjRes = await currentBatchAdjReq.query(`
+        SELECT 
+          COALESCE(SUM(es.shareAmount), 0) AS openingDebit,
+          COALESCE(SUM(ep.amountPaid), 0) AS openingCredit
         FROM dbo.Expenses e
         LEFT JOIN dbo.ExpenseShares es ON es.expenseId = e.id AND es.personId = @personId
         LEFT JOIN dbo.ExpensePayers ep ON ep.expenseId = e.id AND ep.personId = @personId
         WHERE e.batchId = @targetBId
-          AND (es.personId IS NOT NULL OR ep.personId IS NOT NULL)
           AND (e.category = 'Opening Adjustment' OR e.description LIKE 'Auto Opening Balance%' OR e.description = 'Opening Balance')
       `);
-      const hasAutoAdj = parseInt(checkAdjRes.recordset[0].cnt, 10) > 0;
 
-      if (!hasAutoAdj) {
+      const opDebit = parseFloat(currentBatchAdjRes.recordset[0].openingDebit) || 0;
+      const opCredit = parseFloat(currentBatchAdjRes.recordset[0].openingCredit) || 0;
+
+      if (opDebit > 0 || opCredit > 0) {
+        openingBalance = Math.round((opCredit - opDebit) * 100) / 100;
+      } else {
+        // Otherwise, calculate prior net balance from all closed batches prior to targetBatchId
+        const priorReq = pool.request()
+          .input('personId', sql.BigInt, pId)
+          .input('targetBId', sql.BigInt, targetBatchId);
+        const priorRes = await priorReq.query(`
+          SELECT 
+            COALESCE(SUM(ep.amountPaid), 0) AS priorCredit,
+            COALESCE(SUM(es.shareAmount), 0) AS priorDebit
+          FROM dbo.Expenses e
+          LEFT JOIN dbo.ExpenseShares es ON es.expenseId = e.id AND es.personId = @personId
+          LEFT JOIN dbo.ExpensePayers ep ON ep.expenseId = e.id AND ep.personId = @personId
+          WHERE e.batchId < @targetBId
+        `);
+        const priorDebit = parseFloat(priorRes.recordset[0].priorDebit) || 0;
+        const priorCredit = parseFloat(priorRes.recordset[0].priorCredit) || 0;
         openingBalance = Math.round((priorCredit - priorDebit) * 100) / 100;
       }
     } else if (fromM) {
-      // Prior debits (share/expenses allocated before fromM)
-      const priorShareReq = pool.request()
+      // Prior debits & credits before fromM
+      const priorReq = pool.request()
         .input('personId', sql.BigInt, pId)
         .input('fromM', sql.BigInt, fromM);
-      const priorShareRes = await priorShareReq.query(`
-        SELECT COALESCE(SUM(es.shareAmount), 0) AS totalShare
-        FROM dbo.ExpenseShares es
-        JOIN dbo.Expenses e ON e.id = es.expenseId
-        WHERE es.personId = @personId AND e.expenseDate < @fromM
+      const priorRes = await priorReq.query(`
+        SELECT 
+          COALESCE(SUM(ep.amountPaid), 0) AS priorCredit,
+          COALESCE(SUM(es.shareAmount), 0) AS priorDebit
+        FROM dbo.Expenses e
+        LEFT JOIN dbo.ExpenseShares es ON es.expenseId = e.id AND es.personId = @personId
+        LEFT JOIN dbo.ExpensePayers ep ON ep.expenseId = e.id AND ep.personId = @personId
+        WHERE e.expenseDate < @fromM
       `);
-      const priorDebit = parseFloat(priorShareRes.recordset[0].totalShare) || 0;
-
-      // Prior credits (payments / amounts paid before fromM)
-      const priorPaidReq = pool.request()
-        .input('personId', sql.BigInt, pId)
-        .input('fromM', sql.BigInt, fromM);
-      const priorPaidRes = await priorPaidReq.query(`
-        SELECT COALESCE(SUM(ep.amountPaid), 0) AS totalPaid
-        FROM dbo.ExpensePayers ep
-        JOIN dbo.Expenses e ON e.id = ep.expenseId
-        WHERE ep.personId = @personId AND e.expenseDate < @fromM
-      `);
-      const priorCredit = parseFloat(priorPaidRes.recordset[0].totalPaid) || 0;
-
+      const priorDebit = parseFloat(priorRes.recordset[0].priorDebit) || 0;
+      const priorCredit = parseFloat(priorRes.recordset[0].priorCredit) || 0;
       openingBalance = Math.round((priorCredit - priorDebit) * 100) / 100;
     }
 
-    // 2. Query period transactions
+    // 2. Query period transactions (Excluding opening balance entries so they only appear in line 1)
     let txQuery = `
       SELECT 
         e.id AS expenseId,
@@ -1948,6 +1936,7 @@ router.get('/reports/account-ledger', async (req, res) => {
       LEFT JOIN dbo.ExpensePayers ep ON ep.expenseId = e.id AND ep.personId = @personId
       LEFT JOIN dbo.Batches b ON b.id = e.batchId
       WHERE (es.personId IS NOT NULL OR ep.personId IS NOT NULL)
+        AND NOT (e.category = 'Opening Adjustment' OR e.description LIKE 'Auto Opening Balance%' OR e.description = 'Opening Balance')
     `;
 
     const txReq = pool.request().input('personId', sql.BigInt, pId);
@@ -2003,6 +1992,7 @@ router.get('/reports/account-ledger', async (req, res) => {
       companyId: shop.companyId || 1,
       batchId: targetBatchId,
       batchName: targetBatchName,
+      batchFromDate: targetBatchFromDate,
       personId: pId,
       personName: person.name,
       mobileNumber: person.mobileNumber || '',
