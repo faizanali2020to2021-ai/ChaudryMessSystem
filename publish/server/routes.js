@@ -1782,11 +1782,13 @@ router.get('/reports/account-ledger', async (req, res) => {
 
     const fromM = fromMillis ? parseInt(fromMillis, 10) : null;
     const toM = toMillis ? parseInt(toMillis, 10) : null;
+    const bId = batchId && !isNaN(parseInt(batchId, 10)) ? parseInt(batchId, 10) : null;
     let targetBatchId = bId;
     let targetBatchName = null;
 
-    // If no specific batchId provided and no date range provided, default to active batch
-    if (!targetBatchId && !fromM && !toM) {
+    // If no specific batchId provided and not explicitly requested 'all', default to active batch
+    const isExplicitAll = batchId === 'all';
+    if (!targetBatchId && !isExplicitAll) {
       const bRes = await pool.request().query("SELECT TOP 1 id, name, fromDate, toDate FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
       if (bRes.recordset.length > 0) {
         targetBatchId = bRes.recordset[0].id;
@@ -1895,14 +1897,15 @@ router.get('/reports/account-ledger', async (req, res) => {
     if (targetBatchId) {
       txReq.input('targetBId', sql.BigInt, targetBatchId);
       txQuery += ` AND e.batchId = @targetBId`;
-    }
-    if (fromM) {
-      txReq.input('fromM', sql.BigInt, fromM);
-      txQuery += ` AND e.expenseDate >= @fromM`;
-    }
-    if (toM) {
-      txReq.input('toM', sql.BigInt, toM);
-      txQuery += ` AND e.expenseDate <= @toM`;
+    } else {
+      if (fromM) {
+        txReq.input('fromM', sql.BigInt, fromM);
+        txQuery += ` AND e.expenseDate >= @fromM`;
+      }
+      if (toM) {
+        txReq.input('toM', sql.BigInt, toM);
+        txQuery += ` AND e.expenseDate <= @toM`;
+      }
     }
 
     txQuery += ` ORDER BY e.expenseDate ASC, e.id ASC`;

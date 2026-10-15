@@ -70,6 +70,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       applyUserIdentity();
       hideLoginModal();
       await loadPersons();
+      await populateBatchFilter();
 
       // Restore active page/tab from URL hash or localStorage
       const hashView = window.location.hash ? window.location.hash.replace('#', '') : '';
@@ -372,7 +373,9 @@ function switchView(viewName) {
     populateBatchFilter().then(() => loadExpenses());
   }
   if (viewName === 'persons') loadPersonsTable();
-  if (viewName === 'reports') generateActiveReport();
+  if (viewName === 'reports') {
+    populateBatchFilter().then(() => generateActiveReport());
+  }
   if (viewName === 'settings') loadDatabaseStatus();
 }
 
@@ -528,6 +531,11 @@ async function populateBatchFilter() {
     if (!data.success) return;
 
     const batches = data.batches || [];
+    const activeBatch = batches.find(b => b.status === 'active');
+    const defaultBatchId = (state.activeBatch && state.activeBatch.id)
+      ? String(state.activeBatch.id)
+      : (activeBatch ? String(activeBatch.id) : (batches[0] ? String(batches[0].id) : ''));
+
     const optionsHtml = '<option value="">All Batches (تمام بیچز)</option>' +
       batches.map(b => {
         const active = b.status === 'active' ? ' ✅' : ' 🔒';
@@ -539,8 +547,8 @@ async function populateBatchFilter() {
       batchSelect.innerHTML = optionsHtml;
       if (currentVal && batches.find(b => String(b.id) === currentVal)) {
         batchSelect.value = currentVal;
-      } else if (state.activeBatch && state.activeBatch.id) {
-        batchSelect.value = String(state.activeBatch.id);
+      } else if (defaultBatchId) {
+        batchSelect.value = defaultBatchId;
       }
     }
 
@@ -549,8 +557,8 @@ async function populateBatchFilter() {
       reportBatchSelect.innerHTML = optionsHtml;
       if (currentVal && batches.find(b => String(b.id) === currentVal)) {
         reportBatchSelect.value = currentVal;
-      } else if (state.activeBatch && state.activeBatch.id) {
-        reportBatchSelect.value = String(state.activeBatch.id);
+      } else if (defaultBatchId) {
+        reportBatchSelect.value = defaultBatchId;
       }
     }
   } catch (err) {
@@ -1392,7 +1400,7 @@ async function executeDeleteExpense(id) {
 // -----------------------------------------------------------------------------
 // The 6 Reports (Matching Mobile App Exactly)
 // -----------------------------------------------------------------------------
-function switchReportTab(tabName) {
+async function switchReportTab(tabName) {
   state.activeReportTab = tabName;
 
   document.querySelectorAll('.report-tab-btn').forEach(btn => {
@@ -1404,6 +1412,11 @@ function switchReportTab(tabName) {
   const personGroup = document.getElementById('filter-person-group');
   const batchGroup = document.getElementById('filter-batch-group');
   const waBtn = document.getElementById('report-wa-share-btn');
+  const repBatchEl = document.getElementById('report-batch-select');
+
+  if (repBatchEl && repBatchEl.options.length <= 1) {
+    await populateBatchFilter();
+  }
 
   // Adjust filters visibility per report type
   if (tabName === 'total-expense' || tabName === 'paid-by-person') {
@@ -1417,7 +1430,8 @@ function switchReportTab(tabName) {
     if (batchGroup) batchGroup.style.display = 'none';
     waBtn.style.display = 'inline-flex';
   } else if (tabName === 'account-ledger') {
-    dateGroup.style.display = 'flex';
+    const isAll = repBatchEl && !repBatchEl.value;
+    dateGroup.style.display = isAll ? 'flex' : 'none';
     personGroup.style.display = 'flex';
     if (batchGroup) batchGroup.style.display = 'flex';
     waBtn.style.display = 'inline-flex';
@@ -1433,6 +1447,15 @@ function switchReportTab(tabName) {
     waBtn.style.display = 'none';
   }
 
+  generateActiveReport();
+}
+
+function onReportBatchChange() {
+  const repBatchEl = document.getElementById('report-batch-select');
+  const dateGroup = document.getElementById('filter-date-group');
+  if (state.activeReportTab === 'account-ledger' && dateGroup && repBatchEl) {
+    dateGroup.style.display = !repBatchEl.value ? 'flex' : 'none';
+  }
   generateActiveReport();
 }
 
@@ -1658,9 +1681,13 @@ async function renderAccountLedgerReport(personId, fromMillis, toMillis, batchId
   if (!personId) return;
 
   let url = `/api/reports/account-ledger?personId=${personId}`;
-  if (fromMillis) url += `&fromMillis=${fromMillis}`;
-  if (toMillis) url += `&toMillis=${toMillis}`;
-  if (batchId) url += `&batchId=${batchId}`;
+  if (batchId) {
+    url += `&batchId=${batchId}`;
+  } else {
+    url += `&batchId=all`;
+    if (fromMillis) url += `&fromMillis=${fromMillis}`;
+    if (toMillis) url += `&toMillis=${toMillis}`;
+  }
 
   const res = await fetch(url);
   const data = await res.json();
