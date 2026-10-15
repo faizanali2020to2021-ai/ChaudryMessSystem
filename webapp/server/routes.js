@@ -515,10 +515,16 @@ router.get('/expenses', async (req, res) => {
       query += ` AND e.paidByPersonId = @personFilter`;
     }
 
-    if (fromMillis && toMillis) {
+    if (fromMillis && !isNaN(parseInt(fromMillis, 10)) && toMillis && !isNaN(parseInt(toMillis, 10))) {
       request.input('fromM', sql.BigInt, parseInt(fromMillis, 10));
       request.input('toM', sql.BigInt, parseInt(toMillis, 10));
       query += ` AND e.expenseDate BETWEEN @fromM AND @toM`;
+    } else if (fromMillis && !isNaN(parseInt(fromMillis, 10))) {
+      request.input('fromM', sql.BigInt, parseInt(fromMillis, 10));
+      query += ` AND e.expenseDate >= @fromM`;
+    } else if (toMillis && !isNaN(parseInt(toMillis, 10))) {
+      request.input('toM', sql.BigInt, parseInt(toMillis, 10));
+      query += ` AND e.expenseDate <= @toM`;
     }
 
     // Sort order
@@ -2013,8 +2019,8 @@ router.get('/reports/account-ledger', async (req, res) => {
 router.get('/reports/day-wise', async (req, res) => {
   try {
     const { fromMillis, toMillis, personId } = req.query;
-    const fromM = parseInt(fromMillis, 10);
-    const toM = parseInt(toMillis, 10);
+    const fromM = !isNaN(parseInt(fromMillis, 10)) ? parseInt(fromMillis, 10) : 0;
+    const toM = !isNaN(parseInt(toMillis, 10)) ? parseInt(toMillis, 10) : (Date.now() + 86400000);
     const pId = personId && !isNaN(parseInt(personId, 10)) ? parseInt(personId, 10) : null;
 
     const pool = await getPool();
@@ -2025,6 +2031,7 @@ router.get('/reports/day-wise', async (req, res) => {
              (SELECT COUNT(*) FROM dbo.ExpenseShares es2 WHERE es2.expenseId = e.id) AS dividedByCount
       FROM dbo.Expenses e
       WHERE e.category IS NOT NULL
+        AND e.category NOT IN ('Payment', 'Opening Adjustment')
         AND e.expenseDate BETWEEN @fromM AND @toM
     `;
 
@@ -2146,6 +2153,40 @@ router.get('/reports/group-summary', async (req, res) => {
   try {
     const pool = await getPool();
     const shop = await getShopIdentity(pool);
+    const { batchId } = req.query;
+
+    let targetBatchId = null;
+    let selectedBatch = null;
+
+    if (batchId === 'all') {
+      targetBatchId = null;
+    } else if (batchId && !isNaN(parseInt(batchId, 10))) {
+      targetBatchId = parseInt(batchId, 10);
+    } else {
+      // Default to active batch
+      const bRes = await pool.request().query("SELECT TOP 1 id, name, fromDate, toDate, status FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
+      if (bRes.recordset.length > 0) {
+        targetBatchId = bRes.recordset[0].id;
+        selectedBatch = formatBatchDates(bRes.recordset[0]);
+      }
+    }
+
+    if (targetBatchId && !selectedBatch) {
+      const sbRes = await pool.request().input('id', sql.BigInt, targetBatchId).query("SELECT id, name, fromDate, toDate, status FROM dbo.Batches WHERE id = @id");
+      if (sbRes.recordset.length > 0) {
+        selectedBatch = formatBatchDates(sbRes.recordset[0]);
+      }
+    }
+
+    let batchPayersJoin = '';
+    let batchSharesJoin = '';
+    const poolReq = pool.request();
+
+    if (targetBatchId) {
+      poolReq.input('bId', sql.BigInt, targetBatchId);
+      batchPayersJoin = ' JOIN dbo.Expenses ep ON ep.id = ExpensePayers.expenseId WHERE ep.batchId = @bId';
+      batchSharesJoin = ' JOIN dbo.Expenses es ON es.id = ExpenseShares.expenseId WHERE es.batchId = @bId';
+    }
 
     const query = `
       SELECT p.id AS personId, p.name AS personName, p.mobileNumber AS mobileNumber,
@@ -2154,17 +2195,21 @@ router.get('/reports/group-summary', async (req, res) => {
       FROM dbo.Persons p
       LEFT JOIN (
           SELECT personId AS pid, SUM(amountPaid) AS total
-          FROM dbo.ExpensePayers GROUP BY personId
+          FROM dbo.ExpensePayers
+          ${batchPayersJoin}
+          GROUP BY personId
       ) paid ON paid.pid = p.id
       LEFT JOIN (
           SELECT personId AS pid, SUM(shareAmount) AS total
-          FROM dbo.ExpenseShares GROUP BY personId
+          FROM dbo.ExpenseShares
+          ${batchSharesJoin}
+          GROUP BY personId
       ) share ON share.pid = p.id
       WHERE p.isActive = 1
       ORDER BY p.name ASC
     `;
 
-    const result = await pool.request().query(query);
+    const result = await poolReq.query(query);
     const balances = result.recordset.map(row => {
       const paid = parseFloat(row.totalPaid) || 0;
       const share = parseFloat(row.totalShare) || 0;
@@ -2187,6 +2232,9 @@ router.get('/reports/group-summary', async (req, res) => {
       success: true,
       shopName: shop.shopName,
       shopAddress: shop.shopAddress,
+      batchId: targetBatchId,
+      batchName: selectedBatch ? selectedBatch.name : (targetBatchId ? `Batch #${targetBatchId}` : 'All Batches'),
+      selectedBatch,
       balances,
       totalMembers: balances.length,
       totalExpense: Math.round(totalExpense * 100) / 100,

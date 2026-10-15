@@ -486,10 +486,7 @@ function populatePersonSelects() {
     if (currentPaid) paidBy.value = currentPaid;
   }
 
-  if (reportPerson) {
-    reportPerson.innerHTML = optionsHtml;
-    if (currentReport) reportPerson.value = currentReport;
-  }
+  updateReportPersonSelect(state.activeReportTab === 'day-wise');
 
   if (paymentPaidBy) {
     paymentPaidBy.innerHTML = optionsHtml;
@@ -516,6 +513,27 @@ function populatePersonSelects() {
       adjReceivedBy.value = currentAdjRecv;
     } else if (state.persons.length > 1) {
       adjReceivedBy.value = state.persons[1].id;
+    }
+  }
+}
+
+function updateReportPersonSelect(isDayWise) {
+  const select = document.getElementById('report-person-select');
+  if (!select) return;
+  const currentVal = select.value;
+
+  if (isDayWise) {
+    let html = `<option value="">All Members (تمام ممبران / بغیر سلیکشن)</option>`;
+    html += state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    select.innerHTML = html;
+    select.value = currentVal || '';
+  } else {
+    let html = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    select.innerHTML = html;
+    if (currentVal && state.persons.some(p => String(p.id) === String(currentVal))) {
+      select.value = currentVal;
+    } else if (state.persons.length > 0) {
+      select.value = state.persons[0].id;
     }
   }
 }
@@ -802,17 +820,35 @@ function debounceFilterExpenses() {
   filterTimer = setTimeout(loadExpenses, 300);
 }
 
+function clearExpenseDateFilter() {
+  const fromEl = document.getElementById('expense-from-date');
+  const toEl = document.getElementById('expense-to-date');
+  if (fromEl) fromEl.value = '';
+  if (toEl) toEl.value = '';
+  loadExpenses();
+}
+
 async function loadExpenses() {
   const search = document.getElementById('expense-search').value.trim();
   const personId = document.getElementById('expense-filter-person').value;
   const batchId = document.getElementById('expense-filter-batch')?.value || '';
   const sortBy = document.getElementById('expense-sort-by').value;
+  const fromStr = document.getElementById('expense-from-date')?.value || '';
+  const toStr = document.getElementById('expense-to-date')?.value || '';
 
   const params = new URLSearchParams();
   if (search) params.append('searchQuery', search);
   if (personId) params.append('personId', personId);
   if (batchId) params.append('batchId', batchId);
   if (sortBy) params.append('sortBy', sortBy);
+  if (fromStr) {
+    const fromMillis = new Date(fromStr + 'T00:00:00').getTime();
+    params.append('fromMillis', fromMillis);
+  }
+  if (toStr) {
+    const toMillis = new Date(toStr + 'T23:59:59.999').getTime();
+    params.append('toMillis', toMillis);
+  }
 
   try {
     const res = await fetch(`/api/expenses?${params.toString()}`);
@@ -1418,6 +1454,9 @@ async function switchReportTab(tabName) {
     await populateBatchFilter();
   }
 
+  // Update person dropdown options (Day-Wise allows "All Members" without person selection)
+  updateReportPersonSelect(tabName === 'day-wise');
+
   // Adjust filters visibility per report type
   if (tabName === 'total-expense' || tabName === 'paid-by-person') {
     dateGroup.style.display = 'flex';
@@ -1443,7 +1482,7 @@ async function switchReportTab(tabName) {
   } else if (tabName === 'group-summary') {
     dateGroup.style.display = 'none';
     personGroup.style.display = 'none';
-    if (batchGroup) batchGroup.style.display = 'none';
+    if (batchGroup) batchGroup.style.display = 'flex';
     waBtn.style.display = 'none';
   }
 
@@ -1484,7 +1523,7 @@ async function generateActiveReport() {
   } else if (tab === 'day-wise') {
     await renderDayWiseReport(fromMillis, toMillis, personId);
   } else if (tab === 'group-summary') {
-    await renderGroupSummaryReport();
+    await renderGroupSummaryReport(batchId);
   }
 }
 
@@ -1823,7 +1862,7 @@ async function renderDayWiseReport(fromMillis, toMillis, personId) {
   if (!data.success) return;
   state.currentReportData = data;
 
-  const pTitle = data.personName ? ` — ${data.personName}` : '';
+  const pTitle = data.personName ? ` — ${data.personName}` : ' — All Members (تمام ممبران)';
   const subtitle = `Day-Wise Expense Report (${formatDate(fromMillis)} – ${formatDate(toMillis)})${pTitle}`;
   document.getElementById('report-doc-subtitle').textContent = subtitle;
 
@@ -1841,14 +1880,27 @@ async function renderDayWiseReport(fromMillis, toMillis, personId) {
         </div>
         <table class="day-wise-table">
           <tbody>
-            ${g.categories.map(c => `
-              <tr>
-                <td style="font-weight: 700; width: 140px;">${c.category}</td>
-                <td style="text-align: right; color: var(--green-text); font-weight: 600;">
-                  Total ${formatCurrency(c.totalAmount)} &divide; ${c.effectivePersons} = <strong>${formatCurrency(c.calculatedShare)}</strong>
-                </td>
-              </tr>
-            `).join('')}
+            ${g.categories.map(c => {
+              if (data.personName) {
+                return `
+                  <tr>
+                    <td style="font-weight: 700; width: 140px;">${c.category}</td>
+                    <td style="text-align: right; color: var(--green-text); font-weight: 600;">
+                      Total ${formatCurrency(c.totalAmount)} &divide; ${c.effectivePersons} = <strong>${formatCurrency(c.calculatedShare)}</strong>
+                    </td>
+                  </tr>
+                `;
+              } else {
+                return `
+                  <tr>
+                    <td style="font-weight: 700; width: 140px;">${c.category}</td>
+                    <td style="text-align: right; color: var(--green-text); font-weight: 600;">
+                      Total <strong>${formatCurrency(c.totalAmount)}</strong> <small style="color: var(--text-muted); font-size: 12px;">(Split across ${c.effectivePersons} members)</small>
+                    </td>
+                  </tr>
+                `;
+              }
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -1895,14 +1947,20 @@ async function renderDayWiseReport(fromMillis, toMillis, personId) {
 }
 
 // 6. Group Summary & Settlement Report
-async function renderGroupSummaryReport() {
-  const subtitle = `Group Expense Summary & Debt Settlement`;
-  document.getElementById('report-doc-subtitle').textContent = subtitle;
+async function renderGroupSummaryReport(batchId) {
+  let url = '/api/reports/group-summary';
+  if (batchId !== undefined && batchId !== null) {
+    url += `?batchId=${batchId === '' ? 'all' : encodeURIComponent(batchId)}`;
+  }
 
-  const res = await fetch('/api/reports/group-summary');
+  const res = await fetch(url);
   const data = await res.json();
   if (!data.success) return;
   state.currentReportData = data;
+
+  const batchNameStr = data.batchName ? ` [${data.batchName}]` : '';
+  const subtitle = `Group Expense Summary & Debt Settlement${batchNameStr}`;
+  document.getElementById('report-doc-subtitle').textContent = subtitle;
 
   const body = document.getElementById('report-content-body');
 
@@ -2017,6 +2075,13 @@ function exportReportCSV() {
     csvContent += 'Person Name,Total Paid,Total Share,Remaining Balance\n';
     d.balances.forEach(b => {
       csvContent += `"${b.personName}",${b.totalPaid},${b.totalShare},${b.remainingBalance}\n`;
+    });
+  } else if (tab === 'day-wise') {
+    csvContent += 'Date,Category,Total Amount,Effective Persons,Calculated Share\n';
+    (d.groups || []).forEach(g => {
+      (g.categories || []).forEach(c => {
+        csvContent += `"${formatDate(Number(g.dateMillis))}","${c.category}",${c.totalAmount},${c.effectivePersons},${c.calculatedShare}\n`;
+      });
     });
   } else {
     alert('CSV export ready for this report view.');

@@ -190,6 +190,14 @@
               <option value="">All Persons</option>
             </select>
 
+            <div style="display: inline-flex; align-items: center; gap: 6px; background: var(--bg-card); padding: 4px 8px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+              <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">From:</span>
+              <input type="date" id="expense-from-date" class="form-control" style="width: 130px; padding: 4px 6px; font-size: 13px;" onchange="loadExpenses()">
+              <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">To:</span>
+              <input type="date" id="expense-to-date" class="form-control" style="width: 130px; padding: 4px 6px; font-size: 13px;" onchange="loadExpenses()">
+              <button class="btn btn-secondary" title="Clear Date Filter" onclick="clearExpenseDateFilter()" style="padding: 3px 8px; font-size: 11px; line-height: 1.2;">✕</button>
+            </div>
+
             <select id="expense-sort-by" class="form-control" onchange="loadExpenses()">
               <option value="date_desc">Newest First</option>
               <option value="date_asc">Oldest First</option>
@@ -279,7 +287,7 @@
 
             <div id="filter-person-group" style="display: none; align-items: center; gap: 8px;">
               <label style="font-size: 13px; font-weight: 600;">Member:</label>
-              <select id="report-person-select" class="form-control" style="min-width: 180px;">
+              <select id="report-person-select" class="form-control" style="min-width: 180px;" onchange="generateActiveReport()">
                 <!-- dynamic options -->
               </select>
             </div>
