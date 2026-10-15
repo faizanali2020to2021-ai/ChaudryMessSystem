@@ -255,8 +255,9 @@
             <button class="report-tab-btn" onclick="switchReportTab('paid-by-person')">2. Paid by Person</button>
             <button class="report-tab-btn" onclick="switchReportTab('person-ledger')">3. Person Ledger</button>
             <button class="report-tab-btn" onclick="switchReportTab('person-detail-ledger')">4. Detail Ledger</button>
-            <button class="report-tab-btn" onclick="switchReportTab('day-wise')">5. Day-Wise Expense</button>
-            <button class="report-tab-btn" onclick="switchReportTab('group-summary')">6. Group Summary & Settlement</button>
+            <button class="report-tab-btn" onclick="switchReportTab('account-ledger')">5. Account Ledger (کھاتہ)</button>
+            <button class="report-tab-btn" onclick="switchReportTab('day-wise')">6. Day-Wise Expense</button>
+            <button class="report-tab-btn" onclick="switchReportTab('group-summary')">7. Group Summary & Settlement</button>
           </div>
 
           <!-- Report Filters Container -->
@@ -329,6 +330,11 @@
               <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Company / Shop Identity</h3>
               <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">This name and address appears on the top bar, sidebar, and in the header of all printed reports and PDFs.</p>
               
+              <div class="form-group">
+                <label class="form-label">Company ID</label>
+                <input type="number" id="settings-company-id" class="form-control" style="width: 100%; font-weight: 600; background: var(--zebra);" value="1" placeholder="e.g. 1">
+              </div>
+
               <div class="form-group">
                 <label class="form-label">Company / Shop / Mess Name</label>
                 <input type="text" id="settings-shop-name" class="form-control" style="width: 100%; font-weight: 600;" placeholder="e.g. Chaudry Mess System" required>

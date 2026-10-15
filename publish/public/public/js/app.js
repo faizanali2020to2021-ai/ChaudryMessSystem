@@ -284,6 +284,8 @@ function applyUserIdentity() {
   document.getElementById('report-doc-address').textContent = addr;
   document.getElementById('settings-shop-name').value = name;
   document.getElementById('settings-shop-address').value = addr;
+  const compIdEl = document.getElementById('settings-company-id');
+  if (compIdEl) compIdEl.value = state.user.companyId || 1;
   const logoChar = name.trim().charAt(0).toUpperCase() || 'C';
   document.getElementById('report-logo-char').textContent = logoChar;
   const logoEl = document.querySelector('.sidebar-logo');
@@ -1399,6 +1401,10 @@ function switchReportTab(tabName) {
     dateGroup.style.display = 'none';
     personGroup.style.display = 'flex';
     waBtn.style.display = 'inline-flex';
+  } else if (tabName === 'account-ledger') {
+    dateGroup.style.display = 'flex';
+    personGroup.style.display = 'flex';
+    waBtn.style.display = 'inline-flex';
   } else if (tabName === 'day-wise') {
     dateGroup.style.display = 'flex';
     personGroup.style.display = 'flex';
@@ -1431,6 +1437,8 @@ async function generateActiveReport() {
     await renderPersonLedgerReport(personId);
   } else if (tab === 'person-detail-ledger') {
     await renderPersonDetailLedgerReport(personId);
+  } else if (tab === 'account-ledger') {
+    await renderAccountLedgerReport(personId, fromMillis, toMillis);
   } else if (tab === 'day-wise') {
     await renderDayWiseReport(fromMillis, toMillis, personId);
   } else if (tab === 'group-summary') {
@@ -1626,6 +1634,137 @@ async function renderPersonDetailLedgerReport(personId) {
   `;
 }
 
+// 4b. Person Account Ledger Report (Opening Balance -> Expenses [Debit] -> Payments [Credit] -> Net Balance)
+async function renderAccountLedgerReport(personId, fromMillis, toMillis) {
+  if (!personId) return;
+
+  let url = `/api/reports/account-ledger?personId=${personId}`;
+  if (fromMillis) url += `&fromMillis=${fromMillis}`;
+  if (toMillis) url += `&toMillis=${toMillis}`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!data.success) return;
+  state.currentReportData = data;
+
+  const subtitle = `Account Ledger (کھاتہ): ${data.personName}`;
+  document.getElementById('report-doc-subtitle').textContent = subtitle;
+
+  const isNetReceivable = data.netClosingBalance >= 0;
+  const balanceLabel = isNetReceivable ? 'Net Receivable (لینے ہیں)' : 'Net Payable (دینے ہیں)';
+  const balanceColor = isNetReceivable ? 'var(--green-text)' : 'var(--red-text)';
+
+  const opBal = data.openingBalance || 0;
+  const isOpPos = opBal >= 0;
+
+  const body = document.getElementById('report-content-body');
+  body.innerHTML = `
+    <!-- Top Summary Statistics -->
+    <div class="stat-cards-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+      <div class="stat-card" style="border-left: 4px solid #6366f1;">
+        <span class="stat-label">Opening Balance</span>
+        <span class="stat-value" style="color: ${isOpPos ? 'var(--green-text)' : 'var(--red-text)'};">
+          ${formatCurrency(Math.abs(opBal))} <small style="font-size: 11px;">(${isOpPos ? 'Cr / Receivable' : 'Dr / Payable'})</small>
+        </span>
+      </div>
+      <div class="stat-card" style="border-left: 4px solid #ef4444;">
+        <span class="stat-label">Total Expenses (Debit)</span>
+        <span class="stat-value" style="color: var(--red-text);">${formatCurrency(data.periodTotalDebit)}</span>
+      </div>
+      <div class="stat-card" style="border-left: 4px solid #10b981;">
+        <span class="stat-label">Total Payments (Credit)</span>
+        <span class="stat-value" style="color: var(--green-text);">${formatCurrency(data.periodTotalCredit)}</span>
+      </div>
+      <div class="stat-card" style="border-left: 4px solid ${isNetReceivable ? '#10b981' : '#ef4444'};">
+        <span class="stat-label">${balanceLabel}</span>
+        <span class="stat-value" style="color: ${balanceColor};">${formatCurrency(Math.abs(data.netClosingBalance))}</span>
+      </div>
+    </div>
+
+    <!-- Ledger Transactions Table -->
+    <div class="table-container" style="margin-top: 16px;">
+      <table class="app-table">
+        <thead>
+          <tr style="background: var(--table-header-bg, #f1f5f9);">
+            <th style="width: 110px;">Date</th>
+            <th>Description & Category</th>
+            <th style="width: 110px;">Batch</th>
+            <th style="text-align: right; width: 120px; color: #b91c1c;">Debit (Expenses)</th>
+            <th style="text-align: right; width: 120px; color: #047857;">Credit (Payments)</th>
+            <th style="text-align: right; width: 130px;">Net Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- 1. Opening Balance Row -->
+          <tr style="background: rgba(99, 102, 241, 0.08); font-weight: 700;">
+            <td>${formatDate(fromMillis || Date.now())}</td>
+            <td><strong>🏁 Opening Balance B/F (سابقہ بقایا)</strong></td>
+            <td>—</td>
+            <td style="text-align: right; color: #b91c1c;">${opBal < 0 ? formatCurrency(Math.abs(opBal)) : '—'}</td>
+            <td style="text-align: right; color: #047857;">${opBal > 0 ? formatCurrency(opBal) : '—'}</td>
+            <td style="text-align: right; font-weight: 800; color: ${isOpPos ? 'var(--green-text)' : 'var(--red-text)'};">
+              ${formatCurrency(Math.abs(opBal))} ${isOpPos ? 'Cr' : 'Dr'}
+            </td>
+          </tr>
+
+          <!-- 2. Transactions Rows -->
+          ${data.rows.length === 0 ? `
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 24px;">No transactions recorded in this period.</td>
+            </tr>
+          ` : data.rows.map(r => {
+            const isPmt = r.credit > 0 && r.debit === 0;
+            const isBalPos = r.netBalance >= 0;
+            const badge = isPmt
+              ? `<span class="badge" style="background-color: #d1fae5; color: #065f46; font-size: 10px;">💳 Payment</span>`
+              : (r.category ? `<span class="badge badge-primary" style="font-size: 10px;">${r.category}</span>` : '');
+
+            return `
+              <tr>
+                <td>${formatDate(Number(r.date))}</td>
+                <td>
+                  <strong>${r.description}</strong>
+                  <div style="margin-top: 2px;">${badge}</div>
+                </td>
+                <td><span style="font-size: 11px; color: var(--text-muted);">${r.batchName || '—'}</span></td>
+                <td style="text-align: right; font-weight: 600; color: ${r.debit > 0 ? '#b91c1c' : 'var(--text-muted)'};">
+                  ${r.debit > 0 ? formatCurrency(r.debit) : '—'}
+                </td>
+                <td style="text-align: right; font-weight: 600; color: ${r.credit > 0 ? '#047857' : 'var(--text-muted)'};">
+                  ${r.credit > 0 ? formatCurrency(r.credit) : '—'}
+                </td>
+                <td style="text-align: right; font-weight: 700; color: ${isBalPos ? 'var(--green-text)' : 'var(--red-text)'};">
+                  ${formatCurrency(Math.abs(r.netBalance))} ${isBalPos ? 'Cr' : 'Dr'}
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+        <tfoot>
+          <tr style="background: var(--table-header-bg, #f8fafc); font-weight: 800; border-top: 2px solid var(--border-color);">
+            <td colspan="3" style="text-align: right;">Total Period Activity:</td>
+            <td style="text-align: right; color: #b91c1c;">${formatCurrency(data.periodTotalDebit)}</td>
+            <td style="text-align: right; color: #047857;">${formatCurrency(data.periodTotalCredit)}</td>
+            <td style="text-align: right; color: ${balanceColor}; font-size: 15px;">
+              ${formatCurrency(Math.abs(data.netClosingBalance))} ${isNetReceivable ? 'Cr' : 'Dr'}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <!-- Final Net Balance Box -->
+    <div style="text-align: right; margin-top: 24px; font-size: 15px; line-height: 1.8;">
+      <div>Opening Balance: <strong>${formatCurrency(Math.abs(opBal))} ${isOpPos ? 'Cr' : 'Dr'}</strong></div>
+      <div>Total Expenses (Debit): <strong style="color: #b91c1c;">${formatCurrency(data.periodTotalDebit)}</strong></div>
+      <div>Total Payments (Credit): <strong style="color: #047857;">${formatCurrency(data.periodTotalCredit)}</strong></div>
+      <div style="font-size: 20px; font-weight: 800; color: ${balanceColor}; margin-top: 8px;">
+        ${balanceLabel} = ${formatCurrency(Math.abs(data.netClosingBalance))}
+      </div>
+    </div>
+  `;
+}
+
 // 5. Day-Wise Expense Report
 async function renderDayWiseReport(fromMillis, toMillis, personId) {
   let url = `/api/reports/day-wise?fromMillis=${fromMillis}&toMillis=${toMillis}`;
@@ -1802,6 +1941,12 @@ function exportReportCSV() {
     d.rows.forEach(r => {
       csvContent += `"${formatDate(Number(r.date))}","${r.description.replace(/"/g, '""')}",${r.totalAmount},${r.dividedByCount},${r.yourShare}\n`;
     });
+  } else if (tab === 'account-ledger') {
+    csvContent += 'Date,Description,Category,Batch,Debit (Expense),Credit (Payment),Net Balance\n';
+    csvContent += `"Opening Balance","Opening Balance B/F","Opening","—",${d.openingBalance < 0 ? Math.abs(d.openingBalance) : 0},${d.openingBalance > 0 ? d.openingBalance : 0},${d.openingBalance}\n`;
+    d.rows.forEach(r => {
+      csvContent += `"${formatDate(Number(r.date))}","${r.description.replace(/"/g, '""')}","${r.category || ''}","${r.batchName || ''}",${r.debit},${r.credit},${r.netBalance}\n`;
+    });
   } else if (tab === 'group-summary') {
     csvContent += 'Person Name,Total Paid,Total Share,Remaining Balance\n';
     d.balances.forEach(b => {
@@ -1831,20 +1976,39 @@ function shareReportWhatsApp() {
     return;
   }
 
+  const tab = state.activeReportTab;
   const personName = d.personName || (d.balance && d.balance.personName);
-  const totalPaid = d.totalPaid ?? (d.balance && d.balance.totalPaid);
-  const totalExp = d.yourTotalExpense ?? (d.balance && d.balance.totalShare);
-  const remaining = d.remainingBalance ?? (d.balance && d.balance.remainingBalance);
-  const isReceivable = remaining >= 0;
 
-  const message = `*Chaudry Mess System - Expense Ledger Report*\n` +
-    `Member: *${personName}*\n` +
-    `-----------------------------------\n` +
-    `Total Expense: ${formatCurrency(totalExp)}\n` +
-    `Total Paid: ${formatCurrency(totalPaid)}\n` +
-    `*${isReceivable ? 'Receivable Amount' : 'Payable Amount'}:* ${formatCurrency(Math.abs(remaining))}\n` +
-    `-----------------------------------\n` +
-    `Generated on: ${new Date().toLocaleDateString('en-GB')}`;
+  let message = '';
+  if (tab === 'account-ledger') {
+    const opBal = d.openingBalance || 0;
+    const isOpRec = opBal >= 0;
+    const isRec = d.isReceivable;
+
+    message = `*${state.user?.shopName || 'Chaudry Mess System'} - Account Ledger (کھاتہ)*\n` +
+      `Member: *${personName}*\n` +
+      `-----------------------------------\n` +
+      `Opening Balance: ${formatCurrency(Math.abs(opBal))} (${isOpRec ? 'Cr' : 'Dr'})\n` +
+      `Total Expenses (Debit): ${formatCurrency(d.periodTotalDebit)}\n` +
+      `Total Payments (Credit): ${formatCurrency(d.periodTotalCredit)}\n` +
+      `*${isRec ? 'Net Receivable (لینے ہیں)' : 'Net Payable (دینے ہیں)'}:* ${formatCurrency(Math.abs(d.netClosingBalance))}\n` +
+      `-----------------------------------\n` +
+      `Generated on: ${new Date().toLocaleDateString('en-GB')}`;
+  } else {
+    const totalPaid = d.totalPaid ?? (d.balance && d.balance.totalPaid);
+    const totalExp = d.yourTotalExpense ?? (d.balance && d.balance.totalShare);
+    const remaining = d.remainingBalance ?? (d.balance && d.balance.remainingBalance);
+    const isReceivable = remaining >= 0;
+
+    message = `*${state.user?.shopName || 'Chaudry Mess System'} - Expense Ledger Report*\n` +
+      `Member: *${personName}*\n` +
+      `-----------------------------------\n` +
+      `Total Expense: ${formatCurrency(totalExp)}\n` +
+      `Total Paid: ${formatCurrency(totalPaid)}\n` +
+      `*${isReceivable ? 'Receivable Amount' : 'Payable Amount'}:* ${formatCurrency(Math.abs(remaining))}\n` +
+      `-----------------------------------\n` +
+      `Generated on: ${new Date().toLocaleDateString('en-GB')}`;
+  }
 
   const cleanMobile = mobile.replace(/[^0-9]/g, '');
   const url = `https://wa.me/${cleanMobile}?text=${encodeURIComponent(message)}`;
@@ -1857,6 +2021,8 @@ function shareReportWhatsApp() {
 async function saveShopIdentity() {
   const shopName = document.getElementById('settings-shop-name').value.trim();
   const address = document.getElementById('settings-shop-address').value.trim();
+  const compIdInput = document.getElementById('settings-company-id');
+  const companyId = compIdInput ? parseInt(compIdInput.value, 10) || 1 : 1;
   const msgEl = document.getElementById('settings-identity-msg');
   if (msgEl) msgEl.textContent = '';
 
@@ -1872,13 +2038,14 @@ async function saveShopIdentity() {
         'Content-Type': 'application/json',
         'x-user-role': state.user?.role || ''
       },
-      body: JSON.stringify({ shopName, address })
+      body: JSON.stringify({ shopName, address, companyId })
     });
     const data = await res.json();
     if (data.success) {
       if (state.user) {
         state.user.shopName = data.shopName;
         state.user.shopAddress = data.shopAddress;
+        state.user.companyId = data.companyId || companyId;
       }
       applyUserIdentity();
       if (msgEl) {

@@ -348,6 +348,16 @@ async function initTiDBTables(pool) {
       // Column may already exist
     }
 
+    // Ensure companyId column exists on all essential tables
+    const companyTables = ['AppUser', 'Batches', 'Persons', 'Expenses', 'ExpensePayers', 'ExpenseShares'];
+    for (const t of companyTables) {
+      try {
+        await pool.query(`ALTER TABLE ${t} ADD COLUMN companyId INT NOT NULL DEFAULT 1;`);
+      } catch (_) {
+        // Column may already exist
+      }
+    }
+
     // Seed default Admin and User if not present
     await pool.query(`
       INSERT INTO AppUser (id, username, shopName, passwordHash, passwordSalt, shopAddress, hasLoggedInOnce, role)

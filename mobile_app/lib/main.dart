@@ -2355,6 +2355,7 @@ class _ReportsPageState extends State<ReportsPage> {
     'Paid by Person Report',
     'Member Ledger Report',
     'Detail Ledger Report',
+    'Account Ledger (کھاتہ)',
     'Day-Wise Expense Report',
   ];
 
@@ -2422,6 +2423,16 @@ class _ReportsPageState extends State<ReportsPage> {
         }
         if (_selectedPersonId != null) {
           final data = await widget.api.get('/reports/person-detail-ledger?personId=$_selectedPersonId');
+          setState(() { _reportData = data; _loading = false; });
+        } else {
+          setState(() => _loading = false);
+        }
+      } else if (_currentType == 'Account Ledger (کھاتہ)') {
+        if (_selectedPersonId == null && _persons.isNotEmpty) {
+          _selectedPersonId = _persons[0]['id'] as int;
+        }
+        if (_selectedPersonId != null) {
+          final data = await widget.api.get('/reports/account-ledger?personId=$_selectedPersonId&fromMillis=$fromMs&toMillis=$toMs');
           setState(() { _reportData = data; _loading = false; });
         } else {
           setState(() => _loading = false);
@@ -2511,9 +2522,11 @@ class _ReportsPageState extends State<ReportsPage> {
   Widget _buildFilterBar() {
     final needsDates = _currentType == 'Total Expense Report' ||
         _currentType == 'Paid by Person Report' ||
+        _currentType == 'Account Ledger (کھاتہ)' ||
         _currentType == 'Day-Wise Expense Report';
     final needsPerson = _currentType == 'Member Ledger Report' ||
         _currentType == 'Detail Ledger Report' ||
+        _currentType == 'Account Ledger (کھاتہ)' ||
         _currentType == 'Day-Wise Expense Report';
 
     if (!needsDates && !needsPerson) return const SizedBox.shrink();
@@ -2585,7 +2598,7 @@ class _ReportsPageState extends State<ReportsPage> {
                       },
                     ),
                   ),
-                  if (_currentType == 'Member Ledger Report' || _currentType == 'Detail Ledger Report') ...[
+                  if (_currentType == 'Member Ledger Report' || _currentType == 'Detail Ledger Report' || _currentType == 'Account Ledger (کھاتہ)') ...[
                     const SizedBox(width: 8),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366), foregroundColor: Colors.white),
@@ -2595,21 +2608,42 @@ class _ReportsPageState extends State<ReportsPage> {
                         if (_reportData == null) return;
                         final pName = _reportData?['personName'] ?? (_reportData?['balance']?['personName'] ?? 'Member');
                         final mob = _reportData?['mobileNumber'] ?? (_reportData?['balance']?['mobileNumber'] ?? '');
-                        final exp = _reportData?['yourTotalExpense'] ?? (_reportData?['balance']?['totalShare'] ?? 0);
-                        final paid = _reportData?['totalPaid'] ?? (_reportData?['balance']?['totalPaid'] ?? 0);
-                        final rem = double.tryParse((_reportData?['remainingBalance'] ?? (_reportData?['balance']?['remainingBalance'] ?? 0)).toString()) ?? 0;
-                        final isRec = rem >= 0;
 
-                        final msg = "*Chaudry Mess System - Ledger Report*\n"
-                            "Member: *$pName*\n"
-                            "-----------------------------------\n"
-                            "Total Expense: ${formatCurrency(exp)}\n"
-                            "Total Paid: ${formatCurrency(paid)}\n"
-                            "*${isRec ? 'Receivable Amount' : 'Payable Amount'}:* ${formatCurrency(rem.abs())}\n"
-                            "-----------------------------------\n"
-                            "Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}";
+                        if (_currentType == 'Account Ledger (کھاتہ)') {
+                          final op = double.tryParse((_reportData?['openingBalance'] ?? 0).toString()) ?? 0;
+                          final dr = double.tryParse((_reportData?['periodTotalDebit'] ?? 0).toString()) ?? 0;
+                          final cr = double.tryParse((_reportData?['periodTotalCredit'] ?? 0).toString()) ?? 0;
+                          final net = double.tryParse((_reportData?['netClosingBalance'] ?? 0).toString()) ?? 0;
+                          final isRec = net >= 0;
 
-                        _shareWhatsApp(msg, mob?.toString());
+                          final msg = "*${widget.api.shopName ?? 'Chaudry Mess System'} - Account Ledger (کھاتہ)*\n"
+                              "Member: *$pName*\n"
+                              "-----------------------------------\n"
+                              "Opening Balance: ${formatCurrency(op.abs())} (${op >= 0 ? 'Cr' : 'Dr'})\n"
+                              "Total Expenses (Debit): ${formatCurrency(dr)}\n"
+                              "Total Payments (Credit): ${formatCurrency(cr)}\n"
+                              "*${isRec ? 'Net Receivable (لینے ہیں)' : 'Net Payable (دینے ہیں)'}:* ${formatCurrency(net.abs())}\n"
+                              "-----------------------------------\n"
+                              "Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}";
+
+                          _shareWhatsApp(msg, mob?.toString());
+                        } else {
+                          final exp = _reportData?['yourTotalExpense'] ?? (_reportData?['balance']?['totalShare'] ?? 0);
+                          final paid = _reportData?['totalPaid'] ?? (_reportData?['balance']?['totalPaid'] ?? 0);
+                          final rem = double.tryParse((_reportData?['remainingBalance'] ?? (_reportData?['balance']?['remainingBalance'] ?? 0)).toString()) ?? 0;
+                          final isRec = rem >= 0;
+
+                          final msg = "*${widget.api.shopName ?? 'Chaudry Mess System'} - Ledger Report*\n"
+                              "Member: *$pName*\n"
+                              "-----------------------------------\n"
+                              "Total Expense: ${formatCurrency(exp)}\n"
+                              "Total Paid: ${formatCurrency(paid)}\n"
+                              "*${isRec ? 'Receivable Amount' : 'Payable Amount'}:* ${formatCurrency(rem.abs())}\n"
+                              "-----------------------------------\n"
+                              "Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}";
+
+                          _shareWhatsApp(msg, mob?.toString());
+                        }
                       },
                     ),
                   ],
@@ -2635,6 +2669,8 @@ class _ReportsPageState extends State<ReportsPage> {
         return _buildMemberLedgerView();
       case 'Detail Ledger Report':
         return _buildDetailLedgerView();
+      case 'Account Ledger (کھاتہ)':
+        return _buildAccountLedgerView();
       case 'Day-Wise Expense Report':
         return _buildDayWiseView();
       case 'Group Summary & Settlement':
@@ -2887,6 +2923,165 @@ class _ReportsPageState extends State<ReportsPage> {
             ],
           ),
         ),
+      ],
+    );
+  }
+
+  // 5b. Account Ledger Report (Opening Balance -> Expenses [Debit] -> Payments [Credit] -> Net Balance)
+  Widget _buildAccountLedgerView() {
+    final rows = _reportData?['rows'] as List? ?? [];
+    final op = double.tryParse((_reportData?['openingBalance'] ?? 0).toString()) ?? 0;
+    final dr = double.tryParse((_reportData?['periodTotalDebit'] ?? 0).toString()) ?? 0;
+    final cr = double.tryParse((_reportData?['periodTotalCredit'] ?? 0).toString()) ?? 0;
+    final net = double.tryParse((_reportData?['netClosingBalance'] ?? 0).toString()) ?? 0;
+    final isNetPos = net >= 0;
+    final isOpPos = op >= 0;
+
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        // Summary Cards
+        Row(
+          children: [
+            Expanded(child: Card(child: Padding(padding: const EdgeInsets.all(10), child: _InfoCol('Opening Bal', '${formatCurrency(op.abs())} ${isOpPos ? "Cr" : "Dr"}')))),
+            const SizedBox(width: 6),
+            Expanded(child: Card(child: Padding(padding: const EdgeInsets.all(10), child: _InfoCol('Total Dr (Exp)', formatCurrency(dr))))),
+            const SizedBox(width: 6),
+            Expanded(child: Card(child: Padding(padding: const EdgeInsets.all(10), child: _InfoCol('Total Cr (Paid)', formatCurrency(cr))))),
+          ],
+        ),
+        const SizedBox(height: 8),
+
+        // Net Balance Card
+        Card(
+          color: isNetPos ? Colors.green.withOpacity(0.12) : Colors.red.withOpacity(0.12),
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: isNetPos ? Colors.green : Colors.red, width: 1.2)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  isNetPos ? '▲ NET RECEIVABLE (لینے ہیں)' : '▼ NET PAYABLE (دینے ہیں)',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isNetPos ? Colors.green[800] : Colors.red[800]),
+                ),
+                Text(
+                  '${formatCurrency(net.abs())} ${isNetPos ? "Cr" : "Dr"}',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: isNetPos ? Colors.green[900] : Colors.red[900]),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        // 1. Opening Balance Banner Card
+        Card(
+          color: Colors.indigo.withOpacity(0.08),
+          margin: const EdgeInsets.only(bottom: 6),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                const Icon(Icons.flag, color: Colors.indigo, size: 20),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('🏁 Opening Balance B/F (سابقہ بقایا)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                ),
+                Text(
+                  '${formatCurrency(op.abs())} ${isOpPos ? "Cr" : "Dr"}',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: isOpPos ? Colors.green[700] : Colors.red[700]),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // 2. Transactions List
+        if (rows.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: Text('No transactions found in this period.')),
+          )
+        else
+          ...rows.map((r) {
+            final debit = double.tryParse((r['debit'] ?? 0).toString()) ?? 0;
+            final credit = double.tryParse((r['credit'] ?? 0).toString()) ?? 0;
+            final rowNet = double.tryParse((r['netBalance'] ?? 0).toString()) ?? 0;
+            final isRowPos = rowNet >= 0;
+            final isPayment = credit > 0 && debit == 0;
+
+            return Card(
+              margin: const EdgeInsets.only(bottom: 6),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(r['description'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${formatDate(r['date'])} • ${r['batchName'] ?? 'No Batch'}',
+                                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (isPayment)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(color: Colors.green.withOpacity(0.15), borderRadius: BorderRadius.circular(4)),
+                            child: const Text('💳 Payment', style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold)),
+                          )
+                        else if (r['category'] != null && r['category'].toString().isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(color: Colors.blue.withOpacity(0.15), borderRadius: BorderRadius.circular(4)),
+                            child: Text(r['category'].toString(), style: const TextStyle(color: Colors.blue, fontSize: 10, fontWeight: FontWeight.bold)),
+                          ),
+                      ],
+                    ),
+                    const Divider(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Debit (Exp)', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                            Text(debit > 0 ? formatCurrency(debit) : '—', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: debit > 0 ? Colors.red[700] : Colors.grey)),
+                          ],
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            const Text('Credit (Paid)', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                            Text(credit > 0 ? formatCurrency(credit) : '—', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: credit > 0 ? Colors.green[700] : Colors.grey)),
+                          ],
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            const Text('Net Balance', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                            Text('${formatCurrency(rowNet.abs())} ${isRowPos ? "Cr" : "Dr"}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isRowPos ? Colors.green[800] : Colors.red[800])),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        const SizedBox(height: 16),
       ],
     );
   }

@@ -48,6 +48,7 @@ router.post('/auth/login', async (req, res) => {
         role: user.role || 'user',
         shopName: user.shopName,
         shopAddress: user.shopAddress,
+        companyId: user.companyId || 1,
         hasLoggedInOnce: true
       }
     });
@@ -61,11 +62,11 @@ router.post('/auth/login', async (req, res) => {
 router.get('/auth/system-info', async (req, res) => {
   try {
     const pool = await getPool();
-    const result = await pool.request().query('SELECT TOP 1 shopName, shopAddress FROM dbo.AppUser ORDER BY id ASC');
-    const row = result.recordset[0] || { shopName: 'Chaudry Mess System', shopAddress: '' };
-    res.json({ success: true, shopName: row.shopName, shopAddress: row.shopAddress });
+    const result = await pool.request().query('SELECT TOP 1 shopName, shopAddress, companyId FROM dbo.AppUser ORDER BY id ASC');
+    const row = result.recordset[0] || { shopName: 'Chaudry Mess System', shopAddress: '', companyId: 1 };
+    res.json({ success: true, shopName: row.shopName, shopAddress: row.shopAddress, companyId: row.companyId || 1 });
   } catch (err) {
-    res.json({ success: true, shopName: 'Chaudry Mess System', shopAddress: '' });
+    res.json({ success: true, shopName: 'Chaudry Mess System', shopAddress: '', companyId: 1 });
   }
 });
 
@@ -79,7 +80,7 @@ router.get('/auth/user', async (req, res) => {
     const pool = await getPool();
     const result = await pool.request()
       .input('username', sql.NVarChar(100), username.trim())
-      .query('SELECT id, username, role, shopName, shopAddress, hasLoggedInOnce FROM dbo.AppUser WHERE LOWER(username) = LOWER(@username)');
+      .query('SELECT id, username, role, shopName, shopAddress, companyId, hasLoggedInOnce FROM dbo.AppUser WHERE LOWER(username) = LOWER(@username)');
     const user = result.recordset[0];
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     res.json({ success: true, user });
@@ -134,19 +135,22 @@ router.post('/auth/shop-identity', async (req, res) => {
       return res.status(403).json({ success: false, message: 'Permission denied: Only Admin can change company/shop identity.' });
     }
 
-    const { shopName, address } = req.body;
+    const { shopName, address, companyId } = req.body;
     if (!shopName || !shopName.trim()) {
       return res.status(400).json({ success: false, message: 'Company / Shop name is required' });
     }
 
+    const cId = (companyId && !isNaN(parseInt(companyId, 10))) ? parseInt(companyId, 10) : 1;
+
     const pool = await getPool();
-    // Update all AppUser records (admin & user) with the new company name and address
+    // Update all AppUser records (admin & user) with the new company name, address, and companyId
     await pool.request()
       .input('name', sql.NVarChar(200), shopName.trim())
       .input('address', sql.NVarChar(500), (address || '').trim())
+      .input('companyId', sql.Int, cId)
       .query(`
         UPDATE dbo.AppUser 
-        SET shopName = @name, shopAddress = @address, updatedAt = SYSUTCDATETIME()
+        SET shopName = @name, shopAddress = @address, companyId = @companyId, updatedAt = SYSUTCDATETIME()
       `);
 
     // Dual-sync with FoodExpenseManagerDB if exists
@@ -169,6 +173,7 @@ router.post('/auth/shop-identity', async (req, res) => {
       success: true,
       shopName: shopName.trim(),
       shopAddress: (address || '').trim(),
+      companyId: cId,
       message: 'Company / Shop details updated successfully'
     });
   } catch (err) {
@@ -220,11 +225,13 @@ router.post('/persons', async (req, res) => {
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, message: 'Person name is required' });
     }
+    const companyId = req.body.companyId ? parseInt(req.body.companyId, 10) : 1;
     const pool = await getPool();
     const result = await pool.request()
       .input('name', sql.NVarChar(150), name.trim())
       .input('mobile', sql.NVarChar(50), (mobileNumber || '').trim())
-      .query('INSERT INTO dbo.Persons (name, mobileNumber, isActive) OUTPUT INSERTED.id VALUES (@name, @mobile, 1)');
+      .input('companyId', sql.Int, companyId)
+      .query('INSERT INTO dbo.Persons (name, mobileNumber, isActive, companyId) OUTPUT INSERTED.id VALUES (@name, @mobile, 1, @companyId)');
 
     const newId = result.recordset[0].id;
 
@@ -647,6 +654,8 @@ router.post('/expenses', async (req, res) => {
 
     await transaction.begin();
 
+    const expCompanyId = req.body.companyId ? parseInt(req.body.companyId, 10) : 1;
+
     // Insert expense
     const insertExpReq = new sql.Request(transaction);
     insertExpReq.input('expenseDate', sql.BigInt, dateVal);
@@ -655,11 +664,12 @@ router.post('/expenses', async (req, res) => {
     insertExpReq.input('paidByPersonId', sql.BigInt, primaryPayer);
     insertExpReq.input('category', sql.NVarChar(50), category || null);
     insertExpReq.input('batchId', sql.BigInt, targetBatchId || null);
+    insertExpReq.input('companyId', sql.Int, expCompanyId);
 
     const expResult = await insertExpReq.query(`
-      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId)
+      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId)
       OUTPUT INSERTED.id
-      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId)
+      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId, @companyId)
     `);
     const expenseId = expResult.recordset[0].id;
 
@@ -669,7 +679,8 @@ router.post('/expenses', async (req, res) => {
       pReq.input('expenseId', sql.BigInt, expenseId);
       pReq.input('personId', sql.BigInt, p.personId);
       pReq.input('amountPaid', sql.Decimal(18, 2), p.amountPaid);
-      await pReq.query(`INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid) VALUES (@expenseId, @personId, @amountPaid)`);
+      pReq.input('companyId', sql.Int, expCompanyId);
+      await pReq.query(`INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid, companyId) VALUES (@expenseId, @personId, @amountPaid, @companyId)`);
     }
 
     // Insert shares
@@ -678,7 +689,8 @@ router.post('/expenses', async (req, res) => {
       shareReq.input('expenseId', sql.BigInt, expenseId);
       shareReq.input('personId', sql.BigInt, s.personId);
       shareReq.input('shareAmount', sql.Decimal(18, 2), s.shareAmount);
-      await shareReq.query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount) VALUES (@expenseId, @personId, @shareAmount)`);
+      shareReq.input('companyId', sql.Int, expCompanyId);
+      await shareReq.query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (@expenseId, @personId, @shareAmount, @companyId)`);
     }
 
     await transaction.commit();
@@ -740,6 +752,8 @@ router.post('/payments', async (req, res) => {
 
     await transaction.begin();
 
+    const pmtCompanyId = req.body.companyId ? parseInt(req.body.companyId, 10) : 1;
+
     // 1. Insert payment record in Expenses table with category = 'Payment'
     const insertExpReq = new sql.Request(transaction);
     insertExpReq.input('expenseDate', sql.BigInt, dateVal);
@@ -748,11 +762,12 @@ router.post('/payments', async (req, res) => {
     insertExpReq.input('paidByPersonId', sql.BigInt, payerId);
     insertExpReq.input('category', sql.NVarChar(50), 'Payment');
     insertExpReq.input('batchId', sql.BigInt, targetBatchId || null);
+    insertExpReq.input('companyId', sql.Int, pmtCompanyId);
 
     const expResult = await insertExpReq.query(`
-      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId)
+      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId)
       OUTPUT INSERTED.id
-      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId)
+      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId, @companyId)
     `);
     const expenseId = expResult.recordset[0].id;
 
@@ -761,14 +776,16 @@ router.post('/payments', async (req, res) => {
     pReq.input('expenseId', sql.BigInt, expenseId);
     pReq.input('personId', sql.BigInt, payerId);
     pReq.input('amountPaid', sql.Decimal(18, 2), numAmount);
-    await pReq.query(`INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid) VALUES (@expenseId, @personId, @amountPaid)`);
+    pReq.input('companyId', sql.Int, pmtCompanyId);
+    await pReq.query(`INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid, companyId) VALUES (@expenseId, @personId, @amountPaid, @companyId)`);
 
     // 3. Insert into ExpenseShares (Receiver gets debit -> increases totalShare / expense)
     const shareReq = new sql.Request(transaction);
     shareReq.input('expenseId', sql.BigInt, expenseId);
     shareReq.input('personId', sql.BigInt, receiverId);
     shareReq.input('shareAmount', sql.Decimal(18, 2), numAmount);
-    await shareReq.query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount) VALUES (@expenseId, @personId, @shareAmount)`);
+    shareReq.input('companyId', sql.Int, pmtCompanyId);
+    await shareReq.query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (@expenseId, @personId, @shareAmount, @companyId)`);
 
     await transaction.commit();
     res.json({ success: true, expenseId, message: 'Payment recorded successfully' });
@@ -829,6 +846,8 @@ router.post('/opening-adjustments', async (req, res) => {
 
     await transaction.begin();
 
+    const adjCompanyId = req.body.companyId ? parseInt(req.body.companyId, 10) : 1;
+
     // 1. Insert into Expenses with category = 'Opening Adjustment'
     const insertExpReq = new sql.Request(transaction);
     insertExpReq.input('expenseDate', sql.BigInt, dateVal);
@@ -837,11 +856,12 @@ router.post('/opening-adjustments', async (req, res) => {
     insertExpReq.input('paidByPersonId', sql.BigInt, payerId);
     insertExpReq.input('category', sql.NVarChar(50), 'Opening Adjustment');
     insertExpReq.input('batchId', sql.BigInt, targetBatchId || null);
+    insertExpReq.input('companyId', sql.Int, adjCompanyId);
 
     const expResult = await insertExpReq.query(`
-      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId)
+      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId)
       OUTPUT INSERTED.id
-      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId)
+      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId, @companyId)
     `);
     const expenseId = expResult.recordset[0].id;
 
@@ -850,14 +870,16 @@ router.post('/opening-adjustments', async (req, res) => {
     pReq.input('expenseId', sql.BigInt, expenseId);
     pReq.input('personId', sql.BigInt, payerId);
     pReq.input('amountPaid', sql.Decimal(18, 2), numAmount);
-    await pReq.query(`INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid) VALUES (@expenseId, @personId, @amountPaid)`);
+    pReq.input('companyId', sql.Int, adjCompanyId);
+    await pReq.query(`INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid, companyId) VALUES (@expenseId, @personId, @amountPaid, @companyId)`);
 
     // 3. Insert into ExpenseShares (Receiver gets debit)
     const shareReq = new sql.Request(transaction);
     shareReq.input('expenseId', sql.BigInt, expenseId);
     shareReq.input('personId', sql.BigInt, receiverId);
     shareReq.input('shareAmount', sql.Decimal(18, 2), numAmount);
-    await shareReq.query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount) VALUES (@expenseId, @personId, @shareAmount)`);
+    shareReq.input('companyId', sql.Int, adjCompanyId);
+    await shareReq.query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (@expenseId, @personId, @shareAmount, @companyId)`);
 
     await transaction.commit();
     res.json({ success: true, expenseId, message: 'Opening adjustment recorded successfully' });
@@ -955,16 +977,18 @@ router.post('/batches', async (req, res) => {
       await pool.request().query("UPDATE dbo.Batches SET status = 'closed' WHERE status = 'active'");
     }
 
+    const batchCompanyId = req.body.companyId ? parseInt(req.body.companyId, 10) : 1;
     const insertReq = pool.request()
       .input('name', sql.NVarChar(150), name.trim())
       .input('fromDate', sql.BigInt, fromMillis)
       .input('toDate', sql.BigInt, toMillis)
-      .input('status', sql.NVarChar(20), batchStatus);
+      .input('status', sql.NVarChar(20), batchStatus)
+      .input('companyId', sql.Int, batchCompanyId);
 
     const result = await insertReq.query(`
-      INSERT INTO dbo.Batches (name, fromDate, toDate, status)
+      INSERT INTO dbo.Batches (name, fromDate, toDate, status, companyId)
       OUTPUT INSERTED.id
-      VALUES (@name, @fromDate, @toDate, @status)
+      VALUES (@name, @fromDate, @toDate, @status, @companyId)
     `);
     const newId = result.recordset[0].id;
 
@@ -1361,11 +1385,12 @@ router.post('/batches/:id/close-and-transfer', async (req, res) => {
         insExp.input('paidByPersonId', sql.BigInt, creditorId);
         insExp.input('category', sql.NVarChar(50), 'Opening Adjustment');
         insExp.input('batchId', sql.BigInt, targetBatchId);
+        insExp.input('companyId', sql.Int, 1);
 
         const expRes = await insExp.query(`
-          INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId)
+          INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId)
           OUTPUT INSERTED.id
-          VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId)
+          VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId, @companyId)
         `);
         const expenseId = expRes.recordset[0].id;
 
@@ -1374,14 +1399,16 @@ router.post('/batches/:id/close-and-transfer', async (req, res) => {
         insPayer.input('expenseId', sql.BigInt, expenseId);
         insPayer.input('personId', sql.BigInt, creditorId);
         insPayer.input('amountPaid', sql.Decimal(18, 2), amt);
-        await insPayer.query('INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid) VALUES (@expenseId, @personId, @amountPaid)');
+        insPayer.input('companyId', sql.Int, 1);
+        await insPayer.query('INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid, companyId) VALUES (@expenseId, @personId, @amountPaid, @companyId)');
 
         // 3. Insert into ExpenseShares (Debtor gets debit)
         const insShare = new sql.Request(transaction);
         insShare.input('expenseId', sql.BigInt, expenseId);
         insShare.input('personId', sql.BigInt, debtorId);
         insShare.input('shareAmount', sql.Decimal(18, 2), amt);
-        await insShare.query('INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount) VALUES (@expenseId, @personId, @shareAmount)');
+        insShare.input('companyId', sql.Int, 1);
+        await insShare.query('INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (@expenseId, @personId, @shareAmount, @companyId)');
 
         entriesCreated++;
         totalTransferred += amt;
@@ -1533,8 +1560,8 @@ router.delete('/expenses/:id', async (req, res) => {
 
 // Helper to get shop identity for report headers
 async function getShopIdentity(pool) {
-  const res = await pool.request().query('SELECT shopName, shopAddress FROM dbo.AppUser WHERE id = 1');
-  return res.recordset[0] || { shopName: 'Chaudry Mess System', shopAddress: '' };
+  const res = await pool.request().query('SELECT shopName, shopAddress, companyId FROM dbo.AppUser WHERE id = 1');
+  return res.recordset[0] || { shopName: 'Chaudry Mess System', shopAddress: '', companyId: 1 };
 }
 
 // 1. Total Expense Report (date range)
@@ -1732,6 +1759,140 @@ router.get('/reports/person-detail-ledger', async (req, res) => {
       totalPaid,
       remainingBalance,
       isReceivable
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 4b. Person Account Ledger Report (Opening Balance -> Expenses [Debit] -> Payments [Credit] -> Net Balance)
+router.get('/reports/account-ledger', async (req, res) => {
+  try {
+    const { personId, fromMillis, toMillis, batchId } = req.query;
+    const pId = parseInt(personId, 10);
+    if (isNaN(pId)) return res.status(400).json({ success: false, message: 'Invalid personId' });
+
+    const pool = await getPool();
+    const shop = await getShopIdentity(pool);
+
+    // Person info
+    const pRes = await pool.request().input('id', sql.BigInt, pId).query('SELECT name, mobileNumber FROM dbo.Persons WHERE id = @id');
+    const person = pRes.recordset[0];
+    if (!person) return res.status(404).json({ success: false, message: 'Person not found' });
+
+    const fromM = fromMillis ? parseInt(fromMillis, 10) : null;
+    const toM = toMillis ? parseInt(toMillis, 10) : null;
+    const bId = batchId && !isNaN(parseInt(batchId, 10)) ? parseInt(batchId, 10) : null;
+
+    // 1. Calculate Opening Balance before fromM or before selected batch
+    let openingBalance = 0;
+
+    if (fromM) {
+      // Prior debits (share/expenses allocated before fromM)
+      const priorShareReq = pool.request()
+        .input('personId', sql.BigInt, pId)
+        .input('fromM', sql.BigInt, fromM);
+      const priorShareRes = await priorShareReq.query(`
+        SELECT COALESCE(SUM(es.shareAmount), 0) AS totalShare
+        FROM dbo.ExpenseShares es
+        JOIN dbo.Expenses e ON e.id = es.expenseId
+        WHERE es.personId = @personId AND e.expenseDate < @fromM
+      `);
+      const priorDebit = parseFloat(priorShareRes.recordset[0].totalShare) || 0;
+
+      // Prior credits (payments / amounts paid before fromM)
+      const priorPaidReq = pool.request()
+        .input('personId', sql.BigInt, pId)
+        .input('fromM', sql.BigInt, fromM);
+      const priorPaidRes = await priorPaidReq.query(`
+        SELECT COALESCE(SUM(ep.amountPaid), 0) AS totalPaid
+        FROM dbo.ExpensePayers ep
+        JOIN dbo.Expenses e ON e.id = ep.expenseId
+        WHERE ep.personId = @personId AND e.expenseDate < @fromM
+      `);
+      const priorCredit = parseFloat(priorPaidRes.recordset[0].totalPaid) || 0;
+
+      openingBalance = Math.round((priorCredit - priorDebit) * 100) / 100;
+    }
+
+    // 2. Query period transactions
+    let txQuery = `
+      SELECT 
+        e.id AS expenseId,
+        e.expenseDate AS date,
+        e.description AS description,
+        e.category AS category,
+        e.batchId AS batchId,
+        b.name AS batchName,
+        COALESCE(es.shareAmount, 0) AS debitAmount,
+        COALESCE(ep.amountPaid, 0) AS creditAmount
+      FROM dbo.Expenses e
+      LEFT JOIN dbo.ExpenseShares es ON es.expenseId = e.id AND es.personId = @personId
+      LEFT JOIN dbo.ExpensePayers ep ON ep.expenseId = e.id AND ep.personId = @personId
+      LEFT JOIN dbo.Batches b ON b.id = e.batchId
+      WHERE (es.personId IS NOT NULL OR ep.personId IS NOT NULL)
+    `;
+
+    const txReq = pool.request().input('personId', sql.BigInt, pId);
+
+    if (fromM) {
+      txReq.input('fromM', sql.BigInt, fromM);
+      txQuery += ` AND e.expenseDate >= @fromM`;
+    }
+    if (toM) {
+      txReq.input('toM', sql.BigInt, toM);
+      txQuery += ` AND e.expenseDate <= @toM`;
+    }
+    if (bId) {
+      txReq.input('bId', sql.BigInt, bId);
+      txQuery += ` AND e.batchId = @bId`;
+    }
+
+    txQuery += ` ORDER BY e.expenseDate ASC, e.id ASC`;
+
+    const txRes = await txReq.query(txQuery);
+
+    let runningBalance = openingBalance;
+    let periodTotalDebit = 0;
+    let periodTotalCredit = 0;
+
+    const rows = txRes.recordset.map(r => {
+      const debit = parseFloat(r.debitAmount) || 0;
+      const credit = parseFloat(r.creditAmount) || 0;
+      periodTotalDebit += debit;
+      periodTotalCredit += credit;
+      runningBalance = Math.round((runningBalance + credit - debit) * 100) / 100;
+
+      return {
+        expenseId: r.expenseId,
+        date: r.date,
+        description: r.description,
+        category: r.category,
+        batchName: r.batchName,
+        debit,
+        credit,
+        netBalance: runningBalance
+      };
+    });
+
+    const netClosingBalance = runningBalance;
+    const isReceivable = netClosingBalance >= 0;
+
+    res.json({
+      success: true,
+      shopName: shop.shopName,
+      shopAddress: shop.shopAddress,
+      companyId: shop.companyId || 1,
+      personId: pId,
+      personName: person.name,
+      mobileNumber: person.mobileNumber || '',
+      openingBalance,
+      periodTotalDebit: Math.round(periodTotalDebit * 100) / 100,
+      periodTotalCredit: Math.round(periodTotalCredit * 100) / 100,
+      netClosingBalance,
+      isReceivable,
+      rows,
+      totalEntries: rows.length
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
