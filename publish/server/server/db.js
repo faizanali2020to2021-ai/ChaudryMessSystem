@@ -402,6 +402,53 @@ async function initTiDBTables(pool) {
       await pool.query(`UPDATE Expenses SET batchId = ? WHERE batchId IS NULL`, [activeBatchId]);
     }
 
+    // Sync exact original opening balance entries in Batch 2 (replacing any auto-adjustment settlement pairs)
+    const [autoAdjRows] = await pool.query(`
+      SELECT id FROM Expenses
+      WHERE batchId = 2 AND description LIKE 'Auto Opening Balance B/F%'
+    `);
+    if (autoAdjRows && autoAdjRows.length > 0) {
+      const ids = autoAdjRows.map(r => r.id);
+      await pool.query(`DELETE FROM ExpenseShares WHERE expenseId IN (${ids.join(',')})`);
+      await pool.query(`DELETE FROM ExpensePayers WHERE expenseId IN (${ids.join(',')})`);
+      await pool.query(`DELETE FROM Expenses WHERE id IN (${ids.join(',')})`);
+
+      // 1. Jamshed Sb (5) paid 579, shared by Fahad (3) 579
+      const [e1] = await pool.query(`
+        INSERT INTO Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId)
+        VALUES (1791417600000, 'Opening Balance', 579, 5, 'Others', 2, 1)
+      `);
+      await pool.query(`INSERT INTO ExpensePayers (expenseId, personId, amountPaid, companyId) VALUES (?, 5, 579, 1)`, [e1.insertId]);
+      await pool.query(`INSERT INTO ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (?, 3, 579, 1)`, [e1.insertId]);
+
+      // 2. Shahzaib (1) paid 1093, shared by Fahad (3) 695 and Junaid (60002) 398
+      const [e2] = await pool.query(`
+        INSERT INTO Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId)
+        VALUES (1791417600000, 'Opening Balance', 1093, 1, 'Others', 2, 1)
+      `);
+      await pool.query(`INSERT INTO ExpensePayers (expenseId, personId, amountPaid, companyId) VALUES (?, 1, 1093, 1)`, [e2.insertId]);
+      await pool.query(`INSERT INTO ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (?, 3, 695, 1)`, [e2.insertId]);
+      await pool.query(`INSERT INTO ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (?, 60002, 398, 1)`, [e2.insertId]);
+
+      // 3. Umer Khalid (4) paid 862, shared by Junaid (60002) 862
+      const [e3] = await pool.query(`
+        INSERT INTO Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId)
+        VALUES (1791417600000, 'Opening Balance', 862, 4, 'Opening Adjustment', 2, 1)
+      `);
+      await pool.query(`INSERT INTO ExpensePayers (expenseId, personId, amountPaid, companyId) VALUES (?, 4, 862, 1)`, [e3.insertId]);
+      await pool.query(`INSERT INTO ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (?, 60002, 862, 1)`, [e3.insertId]);
+
+      // 4. Ubaid Ullah (2) paid 144, shared by Junaid (60002) 144
+      const [e4] = await pool.query(`
+        INSERT INTO Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId)
+        VALUES (1791417600000, 'Opening Balance', 144, 2, 'Opening Adjustment', 2, 1)
+      `);
+      await pool.query(`INSERT INTO ExpensePayers (expenseId, personId, amountPaid, companyId) VALUES (?, 2, 144, 1)`, [e4.insertId]);
+      await pool.query(`INSERT INTO ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (?, 60002, 144, 1)`, [e4.insertId]);
+
+      console.log(' Replaced auto-adjustment entries with exact original opening entries in Batch 2.');
+    }
+
     global._tidbTablesInitialized = true;
     console.log(' TiDB tables & seed records verified successfully.');
   } catch (err) {

@@ -1435,6 +1435,61 @@ router.post('/batches/:id/close-and-transfer', async (req, res) => {
   }
 });
 
+// POST /api/batches/sync-original-opening
+router.post('/batches/sync-original-opening', async (req, res) => {
+  try {
+    const pool = await getPool();
+
+    // 1. Delete existing auto opening entries in Batch 2
+    const checkRes = await pool.request().query("SELECT id FROM dbo.Expenses WHERE batchId = 2 AND (description LIKE 'Auto Opening Balance B/F%' OR category = 'Opening Adjustment' OR description = 'Opening Balance')");
+    if (checkRes.recordset.length > 0) {
+      const ids = checkRes.recordset.map(r => r.id).join(',');
+      await pool.request().query(`DELETE FROM dbo.ExpenseShares WHERE expenseId IN (${ids})`);
+      await pool.request().query(`DELETE FROM dbo.ExpensePayers WHERE expenseId IN (${ids})`);
+      await pool.request().query(`DELETE FROM dbo.Expenses WHERE id IN (${ids})`);
+    }
+
+    // 2. Insert exact original 4 opening entries into Batch 2:
+    // 1: Jamshed Sb (5) paid 579, shared by Fahad (3) 579
+    const e1Res = await pool.request().query("INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId) OUTPUT INSERTED.id VALUES (1791417600000, 'Opening Balance', 579, 5, 'Others', 2, 1)");
+    const e1Id = e1Res.recordset[0].id;
+    await pool.request().query(`INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid, companyId) VALUES (${e1Id}, 5, 579, 1)`);
+    await pool.request().query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (${e1Id}, 3, 579, 1)`);
+
+    // 2: Shahzaib (1) paid 1093, shared by Fahad (3) 695 and Junaid (60002) 398
+    const e2Res = await pool.request().query("INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId) OUTPUT INSERTED.id VALUES (1791417600000, 'Opening Balance', 1093, 1, 'Others', 2, 1)");
+    const e2Id = e2Res.recordset[0].id;
+    await pool.request().query(`INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid, companyId) VALUES (${e2Id}, 1, 1093, 1)`);
+    await pool.request().query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (${e2Id}, 3, 695, 1)`);
+    await pool.request().query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (${e2Id}, 60002, 398, 1)`);
+
+    // 3: Umer Khalid (4) paid 862, shared by Junaid (60002) 862
+    const e3Res = await pool.request().query("INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId) OUTPUT INSERTED.id VALUES (1791417600000, 'Opening Balance', 862, 4, 'Opening Adjustment', 2, 1)");
+    const e3Id = e3Res.recordset[0].id;
+    await pool.request().query(`INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid, companyId) VALUES (${e3Id}, 4, 862, 1)`);
+    await pool.request().query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (${e3Id}, 60002, 862, 1)`);
+
+    // 4: Ubaid Ullah (2) paid 144, shared by Junaid (60002) 144
+    const e4Res = await pool.request().query("INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId) OUTPUT INSERTED.id VALUES (1791417600000, 'Opening Balance', 144, 2, 'Opening Adjustment', 2, 1)");
+    const e4Id = e4Res.recordset[0].id;
+    await pool.request().query(`INSERT INTO dbo.ExpensePayers (expenseId, personId, amountPaid, companyId) VALUES (${e4Id}, 2, 144, 1)`);
+    await pool.request().query(`INSERT INTO dbo.ExpenseShares (expenseId, personId, shareAmount, companyId) VALUES (${e4Id}, 60002, 144, 1)`);
+
+    res.json({
+      success: true,
+      message: 'Opening balance entries synced to exact original entries in Batch 2.',
+      entries: [
+        { id: e1Id, payer: 'Jamshed Sb', amount: 579, shares: 'Fahad: 579' },
+        { id: e2Id, payer: 'Shahzaib', amount: 1093, shares: 'Fahad: 695, Junaid: 398' },
+        { id: e3Id, payer: 'Umer Khalid', amount: 862, shares: 'Junaid: 862' },
+        { id: e4Id, payer: 'Ubaid Ullah', amount: 144, shares: 'Junaid: 144' }
+      ]
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // PUT /api/expenses/:id
 router.put('/expenses/:id', async (req, res) => {
   const pool = await getPool();
@@ -1838,8 +1893,11 @@ router.get('/reports/account-ledger', async (req, res) => {
       const checkAdjRes = await checkAdjReq.query(`
         SELECT COUNT(*) AS cnt
         FROM dbo.Expenses e
-        JOIN dbo.ExpenseShares es ON es.expenseId = e.id AND es.personId = @personId
-        WHERE e.batchId = @targetBId AND (e.category = 'Opening Adjustment' OR e.description LIKE 'Auto Opening Balance%')
+        LEFT JOIN dbo.ExpenseShares es ON es.expenseId = e.id AND es.personId = @personId
+        LEFT JOIN dbo.ExpensePayers ep ON ep.expenseId = e.id AND ep.personId = @personId
+        WHERE e.batchId = @targetBId
+          AND (es.personId IS NOT NULL OR ep.personId IS NOT NULL)
+          AND (e.category = 'Opening Adjustment' OR e.description LIKE 'Auto Opening Balance%' OR e.description = 'Opening Balance')
       `);
       const hasAutoAdj = parseInt(checkAdjRes.recordset[0].cnt, 10) > 0;
 
