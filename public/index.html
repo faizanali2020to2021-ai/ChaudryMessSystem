@@ -137,14 +137,8 @@
           </button>
           <h1 class="page-title" id="page-title">Dashboard</h1>
         </div>
-        <div class="top-bar-right" style="flex-wrap: wrap; gap: 8px;">
-          <button class="btn btn-sm" id="active-batch-pill" onclick="openBatchesModal()" style="background: rgba(99,102,241,0.12); color: #6366f1; border: 1px solid #6366f1; font-weight: 600; border-radius: 20px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;" title="Click to manage batches">📅 Batch: Loading...</button>
-          <span id="user-role-badge" class="badge badge-green" style="font-size: 13px; font-weight: 700; padding: 6px 12px;">👑 Admin</span>
-          <button class="btn btn-sm" onclick="toggleAIAssistant()" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; border: none; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; box-shadow: 0 2px 6px rgba(99,102,241,0.35);">✨ AI Voice</button>
+        <div class="top-bar-right">
           <button class="btn btn-secondary btn-sm" onclick="toggleTheme()">🌓 Theme</button>
-          <button class="btn btn-warning btn-sm" style="background-color: #F59E0B; border-color: #F59E0B; color: white;" onclick="openOpeningAdjustmentModal()">⚖️ Opening Adjustment</button>
-          <button class="btn btn-success btn-sm" style="background-color: #10B981; border-color: #10B981; color: white;" onclick="openPaymentModal()">💳 Receive Payment</button>
-          <button class="btn btn-primary btn-sm" onclick="openExpenseModal()">+ Add Expense</button>
         </div>
       </header>
 
@@ -168,7 +162,6 @@
           <!-- Section: Persons -->
           <div class="section-header">
             <h2 class="section-title">Persons</h2>
-            <button class="btn btn-secondary btn-sm" onclick="openPersonModal()">+ Add Person</button>
           </div>
 
           <!-- Person Summary Boxes Grid -->
@@ -943,8 +936,8 @@
     </div>
   </div>
 
-  <!-- FLOATING AI VOICE ASSISTANT FAB BUTTON -->
-  <button id="ai-voice-fab" class="ai-fab-btn" onclick="toggleAIAssistant()" title="Open AI Voice Assistant">
+  <!-- FLOATING AI VOICE ASSISTANT FAB BUTTON (Hidden per dashboard cleanup) -->
+  <button id="ai-voice-fab" class="ai-fab-btn" onclick="toggleAIAssistant()" title="Open AI Voice Assistant" style="display: none;">
     <div class="ai-fab-pulse"></div>
     <span class="ai-fab-icon">✨</span>
     <span class="ai-fab-label">AI Voice</span>
