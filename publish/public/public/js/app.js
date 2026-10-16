@@ -411,9 +411,13 @@ async function loadDashboard() {
       const card = document.createElement('div');
       card.className = `person-card ${cardClass}`;
       card.onclick = () => {
-        // Direct link to individual ledger report
+        // Direct link to individual ledger report matching selected batch on dashboard
+        const currentBatch = document.getElementById('dashboard-batch-select')?.value || '';
         switchView('reports');
         switchReportTab('person-detail-ledger');
+        if (currentBatch && document.getElementById('report-batch-select')) {
+          document.getElementById('report-batch-select').value = currentBatch;
+        }
         document.getElementById('report-person-select').value = b.personId;
         generateActiveReport();
       };
@@ -1458,31 +1462,29 @@ async function switchReportTab(tabName) {
   updateReportPersonSelect(tabName === 'day-wise');
 
   // Adjust filters visibility per report type
+  // Batch selector is available for all reports to scope data matching Dashboard
+  if (batchGroup) batchGroup.style.display = 'flex';
+
   if (tabName === 'total-expense' || tabName === 'paid-by-person') {
     dateGroup.style.display = 'flex';
     personGroup.style.display = 'none';
-    if (batchGroup) batchGroup.style.display = 'none';
     waBtn.style.display = 'none';
   } else if (tabName === 'person-ledger' || tabName === 'person-detail-ledger') {
     dateGroup.style.display = 'none';
     personGroup.style.display = 'flex';
-    if (batchGroup) batchGroup.style.display = 'none';
     waBtn.style.display = 'inline-flex';
   } else if (tabName === 'account-ledger') {
     const isAll = repBatchEl && !repBatchEl.value;
     dateGroup.style.display = isAll ? 'flex' : 'none';
     personGroup.style.display = 'flex';
-    if (batchGroup) batchGroup.style.display = 'flex';
     waBtn.style.display = 'inline-flex';
   } else if (tabName === 'day-wise') {
     dateGroup.style.display = 'flex';
     personGroup.style.display = 'flex';
-    if (batchGroup) batchGroup.style.display = 'none';
     waBtn.style.display = 'none';
   } else if (tabName === 'group-summary') {
     dateGroup.style.display = 'none';
     personGroup.style.display = 'none';
-    if (batchGroup) batchGroup.style.display = 'flex';
     waBtn.style.display = 'none';
   }
 
@@ -1511,31 +1513,37 @@ async function generateActiveReport() {
   document.getElementById('report-doc-date').textContent = `Generated: ${new Date().toLocaleString('en-GB')}`;
 
   if (tab === 'total-expense') {
-    await renderTotalExpenseReport(fromMillis, toMillis);
+    await renderTotalExpenseReport(fromMillis, toMillis, batchId);
   } else if (tab === 'paid-by-person') {
-    await renderPaidByPersonReport(fromMillis, toMillis);
+    await renderPaidByPersonReport(fromMillis, toMillis, batchId);
   } else if (tab === 'person-ledger') {
-    await renderPersonLedgerReport(personId);
+    await renderPersonLedgerReport(personId, batchId);
   } else if (tab === 'person-detail-ledger') {
-    await renderPersonDetailLedgerReport(personId);
+    await renderPersonDetailLedgerReport(personId, batchId);
   } else if (tab === 'account-ledger') {
     await renderAccountLedgerReport(personId, fromMillis, toMillis, batchId);
   } else if (tab === 'day-wise') {
-    await renderDayWiseReport(fromMillis, toMillis, personId);
+    await renderDayWiseReport(fromMillis, toMillis, personId, batchId);
   } else if (tab === 'group-summary') {
     await renderGroupSummaryReport(batchId);
   }
 }
 
 // 1. Total Expense Report
-async function renderTotalExpenseReport(fromMillis, toMillis) {
-  const subtitle = `Total Expense Report (${formatDate(fromMillis)} – ${formatDate(toMillis)})`;
-  document.getElementById('report-doc-subtitle').textContent = subtitle;
+async function renderTotalExpenseReport(fromMillis, toMillis, batchId) {
+  let url = `/api/reports/total-expense?fromMillis=${fromMillis}&toMillis=${toMillis}`;
+  if (batchId !== undefined && batchId !== null) {
+    url += `&batchId=${batchId === '' ? 'all' : encodeURIComponent(batchId)}`;
+  }
 
-  const res = await fetch(`/api/reports/total-expense?fromMillis=${fromMillis}&toMillis=${toMillis}`);
+  const res = await fetch(url);
   const data = await res.json();
   if (!data.success) return;
   state.currentReportData = data;
+
+  const bTitle = data.batchName ? ` [${data.batchName}]` : '';
+  const subtitle = `Total Expense Report (${formatDate(fromMillis)} – ${formatDate(toMillis)})${bTitle}`;
+  document.getElementById('report-doc-subtitle').textContent = subtitle;
 
   const body = document.getElementById('report-content-body');
   body.innerHTML = `
@@ -1580,14 +1588,20 @@ async function renderTotalExpenseReport(fromMillis, toMillis) {
 }
 
 // 2. Paid by Person Report
-async function renderPaidByPersonReport(fromMillis, toMillis) {
-  const subtitle = `Paid by Person Report (${formatDate(fromMillis)} – ${formatDate(toMillis)})`;
-  document.getElementById('report-doc-subtitle').textContent = subtitle;
+async function renderPaidByPersonReport(fromMillis, toMillis, batchId) {
+  let url = `/api/reports/paid-by-person?fromMillis=${fromMillis}&toMillis=${toMillis}`;
+  if (batchId !== undefined && batchId !== null) {
+    url += `&batchId=${batchId === '' ? 'all' : encodeURIComponent(batchId)}`;
+  }
 
-  const res = await fetch(`/api/reports/paid-by-person?fromMillis=${fromMillis}&toMillis=${toMillis}`);
+  const res = await fetch(url);
   const data = await res.json();
   if (!data.success) return;
   state.currentReportData = data;
+
+  const bTitle = data.batchName ? ` [${data.batchName}]` : '';
+  const subtitle = `Paid by Person Report (${formatDate(fromMillis)} – ${formatDate(toMillis)})${bTitle}`;
+  document.getElementById('report-doc-subtitle').textContent = subtitle;
 
   const body = document.getElementById('report-content-body');
   body.innerHTML = `
@@ -1616,15 +1630,21 @@ async function renderPaidByPersonReport(fromMillis, toMillis) {
 }
 
 // 3. Person Ledger Report (Summary Card)
-async function renderPersonLedgerReport(personId) {
+async function renderPersonLedgerReport(personId, batchId) {
   if (!personId) return;
-  const res = await fetch(`/api/reports/person-ledger?personId=${personId}`);
+  let url = `/api/reports/person-ledger?personId=${personId}`;
+  if (batchId !== undefined && batchId !== null) {
+    url += `&batchId=${batchId === '' ? 'all' : encodeURIComponent(batchId)}`;
+  }
+
+  const res = await fetch(url);
   const data = await res.json();
   if (!data.success) return;
   state.currentReportData = data;
 
   const b = data.balance;
-  const subtitle = `Ledger Report: ${b.personName}`;
+  const bTitle = data.batchName ? ` [${data.batchName}]` : '';
+  const subtitle = `Ledger Report: ${b.personName}${bTitle}`;
   document.getElementById('report-doc-subtitle').textContent = subtitle;
 
   const isPositive = b.remainingBalance >= 0;
@@ -1653,14 +1673,20 @@ async function renderPersonLedgerReport(personId) {
 }
 
 // 4. Person Detail Ledger Report
-async function renderPersonDetailLedgerReport(personId) {
+async function renderPersonDetailLedgerReport(personId, batchId) {
   if (!personId) return;
-  const res = await fetch(`/api/reports/person-detail-ledger?personId=${personId}`);
+  let url = `/api/reports/person-detail-ledger?personId=${personId}`;
+  if (batchId !== undefined && batchId !== null) {
+    url += `&batchId=${batchId === '' ? 'all' : encodeURIComponent(batchId)}`;
+  }
+
+  const res = await fetch(url);
   const data = await res.json();
   if (!data.success) return;
   state.currentReportData = data;
 
-  const subtitle = `Detail Ledger Report: ${data.personName}`;
+  const bTitle = data.batchName ? ` [${data.batchName}]` : '';
+  const subtitle = `Detail Ledger Report: ${data.personName}${bTitle}`;
   document.getElementById('report-doc-subtitle').textContent = subtitle;
 
   const isPositive = data.remainingBalance >= 0;
@@ -1853,17 +1879,21 @@ async function renderAccountLedgerReport(personId, fromMillis, toMillis, batchId
 }
 
 // 5. Day-Wise Expense Report
-async function renderDayWiseReport(fromMillis, toMillis, personId) {
+async function renderDayWiseReport(fromMillis, toMillis, personId, batchId) {
   let url = `/api/reports/day-wise?fromMillis=${fromMillis}&toMillis=${toMillis}`;
   if (personId) url += `&personId=${personId}`;
+  if (batchId !== undefined && batchId !== null) {
+    url += `&batchId=${batchId === '' ? 'all' : encodeURIComponent(batchId)}`;
+  }
 
   const res = await fetch(url);
   const data = await res.json();
   if (!data.success) return;
   state.currentReportData = data;
 
+  const bTitle = data.batchName ? ` [${data.batchName}]` : '';
   const pTitle = data.personName ? ` — ${data.personName}` : ' — All Members (تمام ممبران)';
-  const subtitle = `Day-Wise Expense Report (${formatDate(fromMillis)} – ${formatDate(toMillis)})${pTitle}`;
+  const subtitle = `Day-Wise Expense Report (${formatDate(fromMillis)} – ${formatDate(toMillis)})${pTitle}${bTitle}`;
   document.getElementById('report-doc-subtitle').textContent = subtitle;
 
   const body = document.getElementById('report-content-body');

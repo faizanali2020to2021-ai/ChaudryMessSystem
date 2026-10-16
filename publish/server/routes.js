@@ -1625,30 +1625,62 @@ async function getShopIdentity(pool) {
   return res.recordset[0] || { shopName: 'Chaudry Mess System', shopAddress: '', companyId: 1 };
 }
 
-// 1. Total Expense Report (date range)
+// 1. Total Expense Report (date range + batch filter)
 router.get('/reports/total-expense', async (req, res) => {
   try {
-    const { fromMillis, toMillis } = req.query;
-    const fromM = parseInt(fromMillis, 10);
-    const toM = parseInt(toMillis, 10);
-
+    const { fromMillis, toMillis, batchId } = req.query;
     const pool = await getPool();
     const shop = await getShopIdentity(pool);
 
-    const query = `
+    let targetBatchId = null;
+    let selectedBatch = null;
+
+    if (batchId === 'all') {
+      targetBatchId = null;
+    } else if (batchId && !isNaN(parseInt(batchId, 10))) {
+      targetBatchId = parseInt(batchId, 10);
+    } else if (!fromMillis && !toMillis) {
+      const bRes = await pool.request().query("SELECT TOP 1 id, name, fromDate, toDate, status FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
+      if (bRes.recordset.length > 0) {
+        targetBatchId = bRes.recordset[0].id;
+        selectedBatch = formatBatchDates(bRes.recordset[0]);
+      }
+    }
+
+    if (targetBatchId && !selectedBatch) {
+      const sbRes = await pool.request().input('id', sql.BigInt, targetBatchId).query("SELECT id, name, fromDate, toDate, status FROM dbo.Batches WHERE id = @id");
+      if (sbRes.recordset.length > 0) {
+        selectedBatch = formatBatchDates(sbRes.recordset[0]);
+      }
+    }
+
+    let query = `
       SELECT e.id, e.expenseDate AS date, e.description, e.amount,
-             e.paidByPersonId, p.name AS paidByName, e.category
+             e.paidByPersonId, p.name AS paidByName, e.category, e.batchId
       FROM dbo.Expenses e
       JOIN dbo.Persons p ON p.id = e.paidByPersonId
-      WHERE e.expenseDate BETWEEN @fromM AND @toM
-      ORDER BY e.expenseDate DESC
+      WHERE 1=1
     `;
+    const request = pool.request();
 
-    const result = await pool.request()
-      .input('fromM', sql.BigInt, fromM)
-      .input('toM', sql.BigInt, toM)
-      .query(query);
+    if (targetBatchId) {
+      request.input('bId', sql.BigInt, targetBatchId);
+      query += ` AND e.batchId = @bId`;
+    }
 
+    if (fromMillis && toMillis) {
+      const fromM = parseInt(fromMillis, 10);
+      const toM = parseInt(toMillis, 10);
+      if (!isNaN(fromM) && !isNaN(toM)) {
+        request.input('fromM', sql.BigInt, fromM);
+        request.input('toM', sql.BigInt, toM);
+        query += ` AND e.expenseDate BETWEEN @fromM AND @toM`;
+      }
+    }
+
+    query += ` ORDER BY e.expenseDate DESC`;
+
+    const result = await request.query(query);
     const expenses = result.recordset;
     const totalExpense = expenses.reduce((sum, e) => sum + parseFloat(e.amount), 0);
 
@@ -1656,9 +1688,11 @@ router.get('/reports/total-expense', async (req, res) => {
       success: true,
       shopName: shop.shopName,
       shopAddress: shop.shopAddress,
-      fromMillis: fromM,
-      toMillis: toM,
-      totalExpense,
+      batchId: targetBatchId,
+      batchName: selectedBatch ? selectedBatch.name : (targetBatchId ? `Batch #${targetBatchId}` : 'All Batches'),
+      fromMillis: fromMillis ? parseInt(fromMillis, 10) : null,
+      toMillis: toMillis ? parseInt(toMillis, 10) : null,
+      totalExpense: Math.round(totalExpense * 100) / 100,
       totalTransactions: expenses.length,
       expenses
     });
@@ -1667,36 +1701,70 @@ router.get('/reports/total-expense', async (req, res) => {
   }
 });
 
-// 2. Paid by Person Report (date range)
+// 2. Paid by Person Report (date range + batch filter)
 router.get('/reports/paid-by-person', async (req, res) => {
   try {
-    const { fromMillis, toMillis } = req.query;
-    const fromM = parseInt(fromMillis, 10);
-    const toM = parseInt(toMillis, 10);
-
+    const { fromMillis, toMillis, batchId } = req.query;
     const pool = await getPool();
     const shop = await getShopIdentity(pool);
 
+    let targetBatchId = null;
+    let selectedBatch = null;
+
+    if (batchId === 'all') {
+      targetBatchId = null;
+    } else if (batchId && !isNaN(parseInt(batchId, 10))) {
+      targetBatchId = parseInt(batchId, 10);
+    } else if (!fromMillis && !toMillis) {
+      const bRes = await pool.request().query("SELECT TOP 1 id, name, fromDate, toDate, status FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
+      if (bRes.recordset.length > 0) {
+        targetBatchId = bRes.recordset[0].id;
+        selectedBatch = formatBatchDates(bRes.recordset[0]);
+      }
+    }
+
+    if (targetBatchId && !selectedBatch) {
+      const sbRes = await pool.request().input('id', sql.BigInt, targetBatchId).query("SELECT id, name, fromDate, toDate, status FROM dbo.Batches WHERE id = @id");
+      if (sbRes.recordset.length > 0) {
+        selectedBatch = formatBatchDates(sbRes.recordset[0]);
+      }
+    }
+
+    let batchFilterSql = '';
+    const request = pool.request();
+    if (targetBatchId) {
+      request.input('bId', sql.BigInt, targetBatchId);
+      batchFilterSql = ' AND ep.expenseId IN (SELECT id FROM dbo.Expenses WHERE batchId = @bId)';
+    }
+
+    let dateFilterSql = '';
+    if (fromMillis && toMillis) {
+      const fromM = parseInt(fromMillis, 10);
+      const toM = parseInt(toMillis, 10);
+      if (!isNaN(fromM) && !isNaN(toM)) {
+        request.input('fromM', sql.BigInt, fromM);
+        request.input('toM', sql.BigInt, toM);
+        dateFilterSql = ' AND e.expenseDate BETWEEN @fromM AND @toM';
+      }
+    }
+
     const query = `
-      SELECT e.paidByPersonId AS personId, p.name AS personName, p.mobileNumber AS mobileNumber,
-             SUM(e.amount) AS totalPaid
-      FROM dbo.Expenses e
-      JOIN dbo.Persons p ON p.id = e.paidByPersonId
-      WHERE e.expenseDate BETWEEN @fromM AND @toM
-      GROUP BY e.paidByPersonId, p.name, p.mobileNumber
+      SELECT p.id AS personId, p.name AS personName, p.mobileNumber AS mobileNumber,
+             COALESCE(SUM(ep.amountPaid), 0) AS totalPaid
+      FROM dbo.Persons p
+      JOIN dbo.ExpensePayers ep ON ep.personId = p.id
+      JOIN dbo.Expenses e ON e.id = ep.expenseId
+      WHERE p.isActive = 1 ${batchFilterSql} ${dateFilterSql}
+      GROUP BY p.id, p.name, p.mobileNumber
       ORDER BY p.name ASC
     `;
 
-    const result = await pool.request()
-      .input('fromM', sql.BigInt, fromM)
-      .input('toM', sql.BigInt, toM)
-      .query(query);
-
+    const result = await request.query(query);
     const totals = result.recordset.map(r => ({
       personId: r.personId,
       personName: r.personName,
       mobileNumber: r.mobileNumber || '',
-      totalPaid: parseFloat(r.totalPaid) || 0
+      totalPaid: Math.round(parseFloat(r.totalPaid) * 100) / 100
     }));
 
     const grandTotal = totals.reduce((sum, t) => sum + t.totalPaid, 0);
@@ -1705,10 +1773,10 @@ router.get('/reports/paid-by-person', async (req, res) => {
       success: true,
       shopName: shop.shopName,
       shopAddress: shop.shopAddress,
-      fromMillis: fromM,
-      toMillis: toM,
+      batchId: targetBatchId,
+      batchName: selectedBatch ? selectedBatch.name : (targetBatchId ? `Batch #${targetBatchId}` : 'All Batches'),
       totalMembers: totals.length,
-      grandTotal,
+      grandTotal: Math.round(grandTotal * 100) / 100,
       totals
     });
   } catch (err) {
@@ -1716,32 +1784,74 @@ router.get('/reports/paid-by-person', async (req, res) => {
   }
 });
 
-// 3. Individual Person Ledger Report (Summary card with Receivable/Payable)
+// 3. Individual Person Ledger Report (Summary card with Receivable/Payable matching Dashboard)
 router.get('/reports/person-ledger', async (req, res) => {
   try {
-    const { personId } = req.query;
+    const { personId, batchId } = req.query;
     const pId = parseInt(personId, 10);
     if (isNaN(pId)) return res.status(400).json({ success: false, message: 'Invalid personId' });
 
     const pool = await getPool();
     const shop = await getShopIdentity(pool);
 
+    let targetBatchId = null;
+    let selectedBatch = null;
+
+    if (batchId === 'all') {
+      targetBatchId = null;
+    } else if (batchId && !isNaN(parseInt(batchId, 10))) {
+      targetBatchId = parseInt(batchId, 10);
+    } else {
+      const bRes = await pool.request().query("SELECT TOP 1 id, name, fromDate, toDate, status FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
+      if (bRes.recordset.length > 0) {
+        targetBatchId = bRes.recordset[0].id;
+        selectedBatch = formatBatchDates(bRes.recordset[0]);
+      }
+    }
+
+    if (targetBatchId && !selectedBatch) {
+      const sbRes = await pool.request().input('id', sql.BigInt, targetBatchId).query("SELECT id, name, fromDate, toDate, status FROM dbo.Batches WHERE id = @id");
+      if (sbRes.recordset.length > 0) {
+        selectedBatch = formatBatchDates(sbRes.recordset[0]);
+      }
+    }
+
+    let batchPayersJoin = '';
+    let batchSharesJoin = '';
+    const poolReq = pool.request().input('personId', sql.BigInt, pId);
+
+    if (targetBatchId) {
+      poolReq.input('bId', sql.BigInt, targetBatchId);
+      batchPayersJoin = ' JOIN dbo.Expenses ep ON ep.id = ExpensePayers.expenseId WHERE ep.batchId = @bId';
+      batchSharesJoin = ' JOIN dbo.Expenses es ON es.id = ExpenseShares.expenseId WHERE es.batchId = @bId';
+    }
+
     const query = `
       SELECT p.id AS personId, p.name AS personName, p.mobileNumber AS mobileNumber,
              COALESCE(paid.total, 0) AS totalPaid,
              COALESCE(share.total, 0) AS totalShare
       FROM dbo.Persons p
-      LEFT JOIN (SELECT personId AS pid, SUM(amountPaid) AS total FROM dbo.ExpensePayers GROUP BY personId) paid ON paid.pid = p.id
-      LEFT JOIN (SELECT personId AS pid, SUM(shareAmount) AS total FROM dbo.ExpenseShares GROUP BY personId) share ON share.pid = p.id
+      LEFT JOIN (
+          SELECT personId AS pid, SUM(amountPaid) AS total
+          FROM dbo.ExpensePayers
+          ${batchPayersJoin}
+          GROUP BY personId
+      ) paid ON paid.pid = p.id
+      LEFT JOIN (
+          SELECT personId AS pid, SUM(shareAmount) AS total
+          FROM dbo.ExpenseShares
+          ${batchSharesJoin}
+          GROUP BY personId
+      ) share ON share.pid = p.id
       WHERE p.id = @personId
     `;
 
-    const result = await pool.request().input('personId', sql.BigInt, pId).query(query);
+    const result = await poolReq.query(query);
     const row = result.recordset[0];
     if (!row) return res.status(404).json({ success: false, message: 'Person not found' });
 
-    const totalPaid = parseFloat(row.totalPaid) || 0;
-    const totalShare = parseFloat(row.totalShare) || 0;
+    const totalPaid = Math.round((parseFloat(row.totalPaid) || 0) * 100) / 100;
+    const totalShare = Math.round((parseFloat(row.totalShare) || 0) * 100) / 100;
     const remainingBalance = Math.round((totalPaid - totalShare) * 100) / 100;
     const isReceivable = remainingBalance >= 0;
 
@@ -1749,6 +1859,8 @@ router.get('/reports/person-ledger', async (req, res) => {
       success: true,
       shopName: shop.shopName,
       shopAddress: shop.shopAddress,
+      batchId: targetBatchId,
+      batchName: selectedBatch ? selectedBatch.name : (targetBatchId ? `Batch #${targetBatchId}` : 'All Batches'),
       balance: {
         personId: row.personId,
         personName: row.personName,
@@ -1764,10 +1876,10 @@ router.get('/reports/person-ledger', async (req, res) => {
   }
 });
 
-// 4. Individual Person Detail Ledger Report (Every expense person shared in + split count + their share)
+// 4. Individual Person Detail Ledger Report (Every expense person shared in + split count + their share matching Dashboard)
 router.get('/reports/person-detail-ledger', async (req, res) => {
   try {
-    const { personId } = req.query;
+    const { personId, batchId } = req.query;
     const pId = parseInt(personId, 10);
     if (isNaN(pId)) return res.status(400).json({ success: false, message: 'Invalid personId' });
 
@@ -1779,7 +1891,35 @@ router.get('/reports/person-detail-ledger', async (req, res) => {
     const person = pRes.recordset[0];
     if (!person) return res.status(404).json({ success: false, message: 'Person not found' });
 
-    // Person ledger rows matching ExpenseDao.getPersonLedgerDetail
+    let targetBatchId = null;
+    let selectedBatch = null;
+
+    if (batchId === 'all') {
+      targetBatchId = null;
+    } else if (batchId && !isNaN(parseInt(batchId, 10))) {
+      targetBatchId = parseInt(batchId, 10);
+    } else {
+      const bRes = await pool.request().query("SELECT TOP 1 id, name, fromDate, toDate, status FROM dbo.Batches WHERE status = 'active' ORDER BY id DESC");
+      if (bRes.recordset.length > 0) {
+        targetBatchId = bRes.recordset[0].id;
+        selectedBatch = formatBatchDates(bRes.recordset[0]);
+      }
+    }
+
+    if (targetBatchId && !selectedBatch) {
+      const sbRes = await pool.request().input('id', sql.BigInt, targetBatchId).query("SELECT id, name, fromDate, toDate, status FROM dbo.Batches WHERE id = @id");
+      if (sbRes.recordset.length > 0) {
+        selectedBatch = formatBatchDates(sbRes.recordset[0]);
+      }
+    }
+
+    let batchFilterSql = '';
+    const detailReq = pool.request().input('personId', sql.BigInt, pId);
+    if (targetBatchId) {
+      detailReq.input('bId', sql.BigInt, targetBatchId);
+      batchFilterSql = ' AND e.batchId = @bId';
+    }
+
     const detailQuery = `
       SELECT e.id AS expenseId, e.expenseDate AS date, e.description AS description, e.amount AS totalAmount,
              (SELECT COUNT(*) FROM dbo.ExpenseShares es2 WHERE es2.expenseId = e.id) AS dividedByCount,
@@ -1787,24 +1927,36 @@ router.get('/reports/person-detail-ledger', async (req, res) => {
       FROM dbo.Expenses e
       JOIN dbo.ExpenseShares es ON es.expenseId = e.id
       WHERE es.personId = @personId
+      ${batchFilterSql}
       ORDER BY e.expenseDate ASC
     `;
 
-    const detailRes = await pool.request().input('personId', sql.BigInt, pId).query(detailQuery);
+    const detailRes = await detailReq.query(detailQuery);
     const rows = detailRes.recordset.map(r => ({
       expenseId: r.expenseId,
       date: r.date,
       description: r.description,
       totalAmount: parseFloat(r.totalAmount) || 0,
       dividedByCount: parseInt(r.dividedByCount, 10) || 1,
-      yourShare: parseFloat(r.yourShare) || 0
+      yourShare: Math.round((parseFloat(r.yourShare) || 0) * 100) / 100
     }));
 
-    // Total paid by this person overall
-    const paidRes = await pool.request().input('personId', sql.BigInt, pId).query('SELECT COALESCE(SUM(amountPaid), 0) AS totalPaid FROM dbo.ExpensePayers WHERE personId = @personId');
-    const totalPaid = parseFloat(paidRes.recordset[0].totalPaid) || 0;
+    // Total paid by this person in the selected batch (or overall if all batches)
+    const paidReq = pool.request().input('personId', sql.BigInt, pId);
+    let paidSql = `SELECT COALESCE(SUM(amountPaid), 0) AS totalPaid FROM dbo.ExpensePayers WHERE personId = @personId`;
+    if (targetBatchId) {
+      paidReq.input('bId', sql.BigInt, targetBatchId);
+      paidSql = `
+        SELECT COALESCE(SUM(ep.amountPaid), 0) AS totalPaid 
+        FROM dbo.ExpensePayers ep
+        JOIN dbo.Expenses e ON e.id = ep.expenseId
+        WHERE ep.personId = @personId AND e.batchId = @bId
+      `;
+    }
+    const paidRes = await paidReq.query(paidSql);
+    const totalPaid = Math.round((parseFloat(paidRes.recordset[0].totalPaid) || 0) * 100) / 100;
 
-    const yourTotalExpense = rows.reduce((sum, r) => sum + r.yourShare, 0);
+    const yourTotalExpense = Math.round(rows.reduce((sum, r) => sum + r.yourShare, 0) * 100) / 100;
     const remainingBalance = Math.round((totalPaid - yourTotalExpense) * 100) / 100;
     const isReceivable = remainingBalance >= 0;
 
@@ -1814,9 +1966,11 @@ router.get('/reports/person-detail-ledger', async (req, res) => {
       shopAddress: shop.shopAddress,
       personName: person.name,
       mobileNumber: person.mobileNumber || '',
+      batchId: targetBatchId,
+      batchName: selectedBatch ? selectedBatch.name : (targetBatchId ? `Batch #${targetBatchId}` : 'All Batches'),
       rows,
       totalEntries: rows.length,
-      yourTotalExpense: Math.round(yourTotalExpense * 100) / 100,
+      yourTotalExpense,
       totalPaid,
       remainingBalance,
       isReceivable
@@ -2018,13 +2172,39 @@ router.get('/reports/account-ledger', async (req, res) => {
 // 5. Day-Wise Expense Report (Grouped by date, then category: Breakfast/Lunch/Dinner/Others)
 router.get('/reports/day-wise', async (req, res) => {
   try {
-    const { fromMillis, toMillis, personId } = req.query;
+    const { fromMillis, toMillis, personId, batchId } = req.query;
     const fromM = !isNaN(parseInt(fromMillis, 10)) ? parseInt(fromMillis, 10) : 0;
     const toM = !isNaN(parseInt(toMillis, 10)) ? parseInt(toMillis, 10) : (Date.now() + 86400000);
     const pId = personId && !isNaN(parseInt(personId, 10)) ? parseInt(personId, 10) : null;
 
     const pool = await getPool();
     const shop = await getShopIdentity(pool);
+
+    let targetBatchId = null;
+    let selectedBatch = null;
+
+    if (batchId === 'all') {
+      targetBatchId = null;
+    } else if (batchId && !isNaN(parseInt(batchId, 10))) {
+      targetBatchId = parseInt(batchId, 10);
+    }
+
+    if (targetBatchId && !selectedBatch) {
+      const sbRes = await pool.request().input('id', sql.BigInt, targetBatchId).query("SELECT id, name, fromDate, toDate, status FROM dbo.Batches WHERE id = @id");
+      if (sbRes.recordset.length > 0) {
+        selectedBatch = formatBatchDates(sbRes.recordset[0]);
+      }
+    }
+
+    let batchFilterSql = '';
+    const request = pool.request()
+      .input('fromM', sql.BigInt, fromM)
+      .input('toM', sql.BigInt, toM);
+
+    if (targetBatchId) {
+      request.input('bId', sql.BigInt, targetBatchId);
+      batchFilterSql = ' AND e.batchId = @bId';
+    }
 
     let query = `
       SELECT e.id AS expenseId, e.expenseDate AS date, e.category AS category, e.amount AS amount,
@@ -2033,11 +2213,8 @@ router.get('/reports/day-wise', async (req, res) => {
       WHERE e.category IS NOT NULL
         AND e.category NOT IN ('Payment', 'Opening Adjustment')
         AND e.expenseDate BETWEEN @fromM AND @toM
+        ${batchFilterSql}
     `;
-
-    const request = pool.request()
-      .input('fromM', sql.BigInt, fromM)
-      .input('toM', sql.BigInt, toM);
 
     if (pId !== null) {
       request.input('personId', sql.BigInt, pId);
@@ -2116,11 +2293,16 @@ router.get('/reports/day-wise', async (req, res) => {
       const pRes = await pool.request().input('personId', sql.BigInt, pId).query('SELECT name FROM dbo.Persons WHERE id = @personId');
       if (pRes.recordset[0]) personName = pRes.recordset[0].name;
 
-      const paidRes = await pool.request()
+      const paidReq = pool.request()
         .input('personId', sql.BigInt, pId)
         .input('fromM', sql.BigInt, fromM)
-        .input('toM', sql.BigInt, toM)
-        .query('SELECT COALESCE(SUM(ep.amountPaid), 0) AS totalPaid FROM dbo.ExpensePayers ep JOIN dbo.Expenses e ON e.id = ep.expenseId WHERE ep.personId = @personId AND e.expenseDate BETWEEN @fromM AND @toM');
+        .input('toM', sql.BigInt, toM);
+      let paidSql = 'SELECT COALESCE(SUM(ep.amountPaid), 0) AS totalPaid FROM dbo.ExpensePayers ep JOIN dbo.Expenses e ON e.id = ep.expenseId WHERE ep.personId = @personId AND e.expenseDate BETWEEN @fromM AND @toM';
+      if (targetBatchId) {
+        paidReq.input('bId', sql.BigInt, targetBatchId);
+        paidSql += ' AND e.batchId = @bId';
+      }
+      const paidRes = await paidReq.query(paidSql);
       totalPaid = parseFloat(paidRes.recordset[0].totalPaid) || 0;
     }
 
@@ -2131,6 +2313,8 @@ router.get('/reports/day-wise', async (req, res) => {
       success: true,
       shopName: shop.shopName,
       shopAddress: shop.shopAddress,
+      batchId: targetBatchId,
+      batchName: selectedBatch ? selectedBatch.name : (targetBatchId ? `Batch #${targetBatchId}` : 'All Batches'),
       fromMillis: fromM,
       toMillis: toM,
       personId: pId,
