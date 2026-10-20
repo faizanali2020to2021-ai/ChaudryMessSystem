@@ -10,13 +10,13 @@ if (!(Test-Path $publishDir)) {
 New-Item -ItemType Directory -Force -Path "$publishDir\backups" | Out-Null
 
 Write-Host "Updating server files..." -ForegroundColor Cyan
-Copy-Item -Recurse -Force "$baseDir\webapp\server" "$publishDir\server"
+Copy-Item -Recurse -Force "$baseDir\webapp\server\*" "$publishDir\server\"
 
 Write-Host "Updating frontend public files..." -ForegroundColor Cyan
-Copy-Item -Recurse -Force "$baseDir\webapp\public" "$publishDir\public"
+Copy-Item -Recurse -Force "$baseDir\webapp\public\*" "$publishDir\public\"
 
 Write-Host "Updating sql scripts..." -ForegroundColor Cyan
-Copy-Item -Recurse -Force "$baseDir\sql_scripts" "$publishDir\sql_scripts"
+Copy-Item -Recurse -Force "$baseDir\sql_scripts\*" "$publishDir\sql_scripts\"
 
 Write-Host "Updating configuration and package files..." -ForegroundColor Cyan
 Copy-Item -Force "$baseDir\webapp\package.json" "$publishDir\"
