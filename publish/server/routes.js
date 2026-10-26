@@ -512,7 +512,7 @@ router.get('/expenses', async (req, res) => {
 
     if (personId && !isNaN(parseInt(personId, 10))) {
       request.input('personFilter', sql.BigInt, parseInt(personId, 10));
-      query += ` AND e.paidByPersonId = @personFilter`;
+      query += ` AND e.id IN (SELECT expenseId FROM dbo.ExpensePayers WHERE personId = @personFilter)`;
     }
 
     if (fromMillis && !isNaN(parseInt(fromMillis, 10)) && toMillis && !isNaN(parseInt(toMillis, 10))) {
@@ -545,7 +545,36 @@ router.get('/expenses', async (req, res) => {
     }
 
     const result = await request.query(query);
-    res.json({ success: true, expenses: result.recordset });
+    const expenses = result.recordset || [];
+
+    if (expenses.length > 0) {
+      const expIds = expenses.map(e => e.id);
+      try {
+        const payersRes = await pool.request().query(`
+          SELECT ep.expenseId, ep.personId, ep.amountPaid, p.name AS personName
+          FROM dbo.ExpensePayers ep
+          JOIN dbo.Persons p ON p.id = ep.personId
+          WHERE ep.expenseId IN (${expIds.join(',')})
+          ORDER BY ep.id ASC
+        `);
+        const payersByExpId = {};
+        payersRes.recordset.forEach(p => {
+          if (!payersByExpId[p.expenseId]) payersByExpId[p.expenseId] = [];
+          payersByExpId[p.expenseId].push({
+            personId: p.personId,
+            name: p.personName,
+            amountPaid: parseFloat(p.amountPaid) || 0
+          });
+        });
+        expenses.forEach(e => {
+          e.payers = payersByExpId[e.id] || [];
+        });
+      } catch (pErr) {
+        console.warn('Could not load payers for expenses:', pErr.message);
+      }
+    }
+
+    res.json({ success: true, expenses });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

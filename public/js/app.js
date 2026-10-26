@@ -869,6 +869,8 @@ async function loadExpenses() {
     }
 
     const isAdmin = state.user && state.user.role === 'admin';
+    const selectedPersonFilter = Number(document.getElementById('expense-filter-person')?.value) || 0;
+
     state.expenses.forEach(e => {
       const tr = document.createElement('tr');
       const isPayment = e.category === 'Payment';
@@ -881,12 +883,49 @@ async function loadExpenses() {
       
       const batchLabel = e.batchName ? `<div style="font-size: 11px; color: var(--text-muted); font-weight: normal;">🏷️ ${e.batchName}</div>` : '';
 
+      // Multi-payer and individual paid amounts resolution
+      const payers = Array.isArray(e.payers) && e.payers.length > 0 ? e.payers : [];
+      const isMultiPayer = payers.length > 1;
+
+      let paidByHtml = e.paidByName;
+      let displayAmount = e.amount;
+      let amountSubHtml = '';
+
+      if (selectedPersonFilter > 0) {
+        // When filtered by a specific person, show only what that person paid!
+        const myPayer = payers.find(p => Number(p.personId) === selectedPersonFilter);
+        if (myPayer) {
+          displayAmount = myPayer.amountPaid;
+          paidByHtml = `<span style="font-weight: 600;">${myPayer.name}</span>`;
+          if (isMultiPayer) {
+            paidByHtml += ` <span class="badge" style="background:#e0e7ff; color:#3730a3; font-size:10px; padding:2px 6px; margin-left:4px;">👥 Multi</span>`;
+            amountSubHtml = `<div style="font-size: 10px; color: var(--text-muted); font-weight: normal;">Total: ${formatCurrency(e.amount)}</div>`;
+          }
+        }
+      } else if (isMultiPayer) {
+        // When viewing all persons, show each payer with their exact amount!
+        paidByHtml = `
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <span class="badge" style="background:#e0e7ff; color:#3730a3; font-size:10px; padding:2px 6px; width:fit-content; margin-bottom:2px;">👥 Multi-Payer (${payers.length})</span>
+            ${payers.map(p => `
+              <div style="font-size:12.5px; white-space:nowrap;">
+                <strong>${p.name}:</strong> <span style="color:#059669; font-weight:600;">${formatCurrency(p.amountPaid)}</span>
+              </div>
+            `).join('')}
+          </div>
+        `;
+        amountSubHtml = `<div style="font-size: 10px; color: var(--text-muted); font-weight: normal;">Total Expense</div>`;
+      }
+
       tr.innerHTML = `
         <td>${formatDate(Number(e.date))}</td>
         <td><strong>${e.description}</strong>${batchLabel}</td>
         <td>${catBadge}</td>
-        <td>${e.paidByName}</td>
-        <td style="text-align: right; font-weight: 700; ${isPayment ? 'color: #10B981;' : (isAdjustment ? 'color: #F59E0B;' : '')}">${formatCurrency(e.amount)}</td>
+        <td>${paidByHtml}</td>
+        <td style="text-align: right; font-weight: 700; ${isPayment ? 'color: #10B981;' : (isAdjustment ? 'color: #F59E0B;' : '')}">
+          ${formatCurrency(displayAmount)}
+          ${amountSubHtml}
+        </td>
         <td style="text-align: center;">
           <button class="btn btn-secondary btn-sm" onclick="openExpenseModal(${e.id})">Edit</button>
           ${isAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">Delete</button>` : ''}
