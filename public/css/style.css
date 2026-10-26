@@ -757,23 +757,54 @@ body.sidebar-collapsed .sidebar {
 .split-persons-box {
   border: 1px solid var(--card-border);
   border-radius: var(--radius-md);
-  padding: 12px;
+  padding: 10px 12px;
   background: var(--surface);
   max-height: 180px;
   overflow-y: auto;
 }
 
+.split-persons-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+}
+
+@media (max-width: 420px) {
+  .split-persons-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .split-person-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 6px 8px;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.02));
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
 }
 
 .split-person-row:hover {
   background: var(--zebra);
+  border-color: var(--card-border);
+}
+
+.split-person-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.split-person-row span {
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Live split indicator */

@@ -1192,6 +1192,7 @@ function setSplitMode(mode) {
 
 function renderSplitCheckboxes(selectedIds) {
   const container = document.getElementById('split-persons-list');
+  container.className = 'split-persons-box split-persons-grid';
   container.innerHTML = '';
 
   state.persons.forEach(p => {
@@ -1208,6 +1209,7 @@ function renderSplitCheckboxes(selectedIds) {
 
 function renderCustomSplitInputs(selectedIds) {
   const container = document.getElementById('split-persons-list');
+  container.className = 'split-persons-box';
   container.innerHTML = '';
   const totalAmount = parseFloat(document.getElementById('expense-input-amount').value) || 0;
   const count = selectedIds.size || state.persons.length;
