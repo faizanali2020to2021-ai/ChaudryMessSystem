@@ -490,7 +490,7 @@ function populatePersonSelects() {
     if (currentPaid) paidBy.value = currentPaid;
   }
 
-  updateReportPersonSelect(state.activeReportTab === 'day-wise');
+  updateReportPersonSelect(state.activeReportTab === 'day-wise' || state.activeReportTab === 'total-expense', state.activeReportTab === 'total-expense');
 
   if (paymentPaidBy) {
     paymentPaidBy.innerHTML = optionsHtml;
@@ -521,7 +521,7 @@ function populatePersonSelects() {
   }
 }
 
-function updateReportPersonSelect(isAllAllowed) {
+function updateReportPersonSelect(isAllAllowed, forceAll = false) {
   const select = document.getElementById('report-person-select');
   if (!select) return;
   const currentVal = select.value;
@@ -530,7 +530,11 @@ function updateReportPersonSelect(isAllAllowed) {
     let html = `<option value="">All (تمام ممبرز / سب)</option>`;
     html += state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
     select.innerHTML = html;
-    select.value = (currentVal && state.persons.some(p => String(p.id) === String(currentVal))) ? currentVal : '';
+    if (forceAll) {
+      select.value = '';
+    } else {
+      select.value = (currentVal && state.persons.some(p => String(p.id) === String(currentVal))) ? currentVal : '';
+    }
   } else {
     let html = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
     select.innerHTML = html;
@@ -1500,7 +1504,7 @@ async function switchReportTab(tabName) {
   }
 
   // Update person dropdown options (Day-Wise and Total Expense allow "All")
-  updateReportPersonSelect(tabName === 'day-wise' || tabName === 'total-expense');
+  updateReportPersonSelect(tabName === 'day-wise' || tabName === 'total-expense', tabName === 'total-expense');
 
   // Adjust filters visibility per report type
   // Batch selector is available for all reports to scope data matching Dashboard
@@ -1513,6 +1517,8 @@ async function switchReportTab(tabName) {
     personGroup.style.display = 'flex';
     if (personLabel) personLabel.textContent = 'Paid By:';
     waBtn.style.display = 'none';
+    const repPersonEl = document.getElementById('report-person-select');
+    if (repPersonEl) repPersonEl.value = '';
   } else if (tabName === 'paid-by-person') {
     dateGroup.style.display = 'flex';
     personGroup.style.display = 'none';
