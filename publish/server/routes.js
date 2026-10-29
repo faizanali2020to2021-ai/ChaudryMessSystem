@@ -1657,7 +1657,7 @@ async function getShopIdentity(pool) {
 // 1. Total Expense Report (date range + batch filter)
 router.get('/reports/total-expense', async (req, res) => {
   try {
-    const { fromMillis, toMillis, batchId } = req.query;
+    const { fromMillis, toMillis, batchId, personId } = req.query;
     const pool = await getPool();
     const shop = await getShopIdentity(pool);
 
@@ -1683,14 +1683,37 @@ router.get('/reports/total-expense', async (req, res) => {
       }
     }
 
-    let query = `
-      SELECT e.id, e.expenseDate AS date, e.description, e.amount,
-             e.paidByPersonId, p.name AS paidByName, e.category, e.batchId
-      FROM dbo.Expenses e
-      JOIN dbo.Persons p ON p.id = e.paidByPersonId
-      WHERE 1=1
-    `;
+    let targetPersonName = null;
     const request = pool.request();
+
+    let query = '';
+    if (personId && !isNaN(parseInt(personId, 10))) {
+      const pId = parseInt(personId, 10);
+      request.input('personFilter', sql.BigInt, pId);
+      const pRes = await pool.request().input('pId', sql.BigInt, pId).query("SELECT name FROM dbo.Persons WHERE id = @pId");
+      if (pRes.recordset.length > 0) {
+        targetPersonName = pRes.recordset[0].name;
+      }
+
+      query = `
+        SELECT e.id, e.expenseDate AS date, e.description,
+               ep.amountPaid AS amount,
+               e.amount AS totalExpenseAmount,
+               ep.personId AS paidByPersonId, p.name AS paidByName, e.category, e.batchId
+        FROM dbo.Expenses e
+        JOIN dbo.ExpensePayers ep ON ep.expenseId = e.id AND ep.personId = @personFilter
+        JOIN dbo.Persons p ON p.id = ep.personId
+        WHERE 1=1
+      `;
+    } else {
+      query = `
+        SELECT e.id, e.expenseDate AS date, e.description, e.amount,
+               e.paidByPersonId, p.name AS paidByName, e.category, e.batchId
+        FROM dbo.Expenses e
+        JOIN dbo.Persons p ON p.id = e.paidByPersonId
+        WHERE 1=1
+      `;
+    }
 
     if (targetBatchId) {
       request.input('bId', sql.BigInt, targetBatchId);
@@ -1710,7 +1733,36 @@ router.get('/reports/total-expense', async (req, res) => {
     query += ` ORDER BY e.expenseDate DESC`;
 
     const result = await request.query(query);
-    const expenses = result.recordset;
+    const expenses = result.recordset || [];
+
+    // Load payers for returned expenses (for multi-payer breakdown when viewing all)
+    if (expenses.length > 0 && !personId) {
+      const expIds = expenses.map(e => e.id);
+      try {
+        const payersRes = await pool.request().query(`
+          SELECT ep.expenseId, ep.personId, ep.amountPaid, p.name AS personName
+          FROM dbo.ExpensePayers ep
+          JOIN dbo.Persons p ON p.id = ep.personId
+          WHERE ep.expenseId IN (${expIds.join(',')})
+          ORDER BY ep.id ASC
+        `);
+        const payersByExpId = {};
+        payersRes.recordset.forEach(p => {
+          if (!payersByExpId[p.expenseId]) payersByExpId[p.expenseId] = [];
+          payersByExpId[p.expenseId].push({
+            personId: p.personId,
+            name: p.personName,
+            amountPaid: parseFloat(p.amountPaid) || 0
+          });
+        });
+        expenses.forEach(e => {
+          e.payers = payersByExpId[e.id] || [];
+        });
+      } catch (pErr) {
+        console.warn('Could not load payers for total expense report:', pErr.message);
+      }
+    }
+
     const totalExpense = expenses.reduce((sum, e) => sum + parseFloat(e.amount), 0);
 
     res.json({
@@ -1719,6 +1771,8 @@ router.get('/reports/total-expense', async (req, res) => {
       shopAddress: shop.shopAddress,
       batchId: targetBatchId,
       batchName: selectedBatch ? selectedBatch.name : (targetBatchId ? `Batch #${targetBatchId}` : 'All Batches'),
+      personId: personId ? parseInt(personId, 10) : null,
+      personName: targetPersonName,
       fromMillis: fromMillis ? parseInt(fromMillis, 10) : null,
       toMillis: toMillis ? parseInt(toMillis, 10) : null,
       totalExpense: Math.round(totalExpense * 100) / 100,

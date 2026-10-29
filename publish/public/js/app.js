@@ -374,7 +374,7 @@ function switchView(viewName) {
   }
   if (viewName === 'persons') loadPersonsTable();
   if (viewName === 'reports') {
-    populateBatchFilter().then(() => generateActiveReport());
+    populateBatchFilter().then(() => switchReportTab(state.activeReportTab || 'total-expense'));
   }
   if (viewName === 'settings') loadDatabaseStatus();
 }
@@ -521,16 +521,16 @@ function populatePersonSelects() {
   }
 }
 
-function updateReportPersonSelect(isDayWise) {
+function updateReportPersonSelect(isAllAllowed) {
   const select = document.getElementById('report-person-select');
   if (!select) return;
   const currentVal = select.value;
 
-  if (isDayWise) {
-    let html = `<option value="">All Members (تمام ممبران / بغیر سلیکشن)</option>`;
+  if (isAllAllowed) {
+    let html = `<option value="">All (تمام ممبرز / سب)</option>`;
     html += state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
     select.innerHTML = html;
-    select.value = currentVal || '';
+    select.value = (currentVal && state.persons.some(p => String(p.id) === String(currentVal))) ? currentVal : '';
   } else {
     let html = state.persons.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
     select.innerHTML = html;
@@ -1499,29 +1499,39 @@ async function switchReportTab(tabName) {
     await populateBatchFilter();
   }
 
-  // Update person dropdown options (Day-Wise allows "All Members" without person selection)
-  updateReportPersonSelect(tabName === 'day-wise');
+  // Update person dropdown options (Day-Wise and Total Expense allow "All")
+  updateReportPersonSelect(tabName === 'day-wise' || tabName === 'total-expense');
 
   // Adjust filters visibility per report type
   // Batch selector is available for all reports to scope data matching Dashboard
   if (batchGroup) batchGroup.style.display = 'flex';
 
-  if (tabName === 'total-expense' || tabName === 'paid-by-person') {
+  const personLabel = document.getElementById('report-person-label');
+
+  if (tabName === 'total-expense') {
+    dateGroup.style.display = 'flex';
+    personGroup.style.display = 'flex';
+    if (personLabel) personLabel.textContent = 'Paid By:';
+    waBtn.style.display = 'none';
+  } else if (tabName === 'paid-by-person') {
     dateGroup.style.display = 'flex';
     personGroup.style.display = 'none';
     waBtn.style.display = 'none';
   } else if (tabName === 'person-ledger' || tabName === 'person-detail-ledger') {
     dateGroup.style.display = 'none';
     personGroup.style.display = 'flex';
+    if (personLabel) personLabel.textContent = 'Member:';
     waBtn.style.display = 'inline-flex';
   } else if (tabName === 'account-ledger') {
     const isAll = repBatchEl && !repBatchEl.value;
     dateGroup.style.display = isAll ? 'flex' : 'none';
     personGroup.style.display = 'flex';
+    if (personLabel) personLabel.textContent = 'Member:';
     waBtn.style.display = 'inline-flex';
   } else if (tabName === 'day-wise') {
     dateGroup.style.display = 'flex';
     personGroup.style.display = 'flex';
+    if (personLabel) personLabel.textContent = 'Member:';
     waBtn.style.display = 'none';
   } else if (tabName === 'group-summary') {
     dateGroup.style.display = 'none';
@@ -1554,7 +1564,7 @@ async function generateActiveReport() {
   document.getElementById('report-doc-date').textContent = `Generated: ${new Date().toLocaleString('en-GB')}`;
 
   if (tab === 'total-expense') {
-    await renderTotalExpenseReport(fromMillis, toMillis, batchId);
+    await renderTotalExpenseReport(fromMillis, toMillis, batchId, personId);
   } else if (tab === 'paid-by-person') {
     await renderPaidByPersonReport(fromMillis, toMillis, batchId);
   } else if (tab === 'person-ledger') {
@@ -1571,10 +1581,13 @@ async function generateActiveReport() {
 }
 
 // 1. Total Expense Report
-async function renderTotalExpenseReport(fromMillis, toMillis, batchId) {
+async function renderTotalExpenseReport(fromMillis, toMillis, batchId, personId) {
   let url = `/api/reports/total-expense?fromMillis=${fromMillis}&toMillis=${toMillis}`;
   if (batchId !== undefined && batchId !== null) {
     url += `&batchId=${batchId === '' ? 'all' : encodeURIComponent(batchId)}`;
+  }
+  if (personId) {
+    url += `&personId=${encodeURIComponent(personId)}`;
   }
 
   const res = await fetch(url);
@@ -1583,7 +1596,8 @@ async function renderTotalExpenseReport(fromMillis, toMillis, batchId) {
   state.currentReportData = data;
 
   const bTitle = data.batchName ? ` [${data.batchName}]` : '';
-  const subtitle = `Total Expense Report (${formatDate(fromMillis)} – ${formatDate(toMillis)})${bTitle}`;
+  const pTitle = data.personName ? ` - Paid By: ${data.personName}` : '';
+  const subtitle = `Total Expense Report (${formatDate(fromMillis)} – ${formatDate(toMillis)})${bTitle}${pTitle}`;
   document.getElementById('report-doc-subtitle').textContent = subtitle;
 
   const body = document.getElementById('report-content-body');
@@ -1610,14 +1624,38 @@ async function renderTotalExpenseReport(fromMillis, toMillis, batchId) {
           </tr>
         </thead>
         <tbody>
-          ${data.expenses.map(e => `
-            <tr>
-              <td>${formatDate(Number(e.date))}</td>
-              <td>${e.description}</td>
-              <td>${e.paidByName}</td>
-              <td style="text-align: right; font-weight: 700;">${formatCurrency(e.amount)}</td>
-            </tr>
-          `).join('')}
+          ${(data.expenses || []).map(e => {
+            const isPayment = e.category === 'Payment';
+            const isAdjustment = e.category === 'Opening Adjustment';
+            const catBadge = isPayment
+              ? ` <span class="badge" style="background-color: #d1fae5; color: #065f46; font-size: 11px;">💳 Payment</span>`
+              : (isAdjustment
+              ? ` <span class="badge" style="background-color: #fef3c7; color: #92400e; font-size: 11px;">⚖️ Opening Adj</span>`
+              : (e.category ? ` <span class="badge badge-primary" style="font-size: 11px;">${e.category}</span>` : ''));
+
+            let paidByHtml = e.paidByName;
+            if (e.payers && e.payers.length > 1 && !personId) {
+              paidByHtml = `
+                <div style="font-size: 12.5px;">
+                  ${e.payers.map(p => `<div><strong>${p.name}:</strong> ${formatCurrency(p.amountPaid)}</div>`).join('')}
+                </div>
+              `;
+            } else if (personId && e.totalExpenseAmount && Number(e.totalExpenseAmount) > Number(e.amount)) {
+              paidByHtml = `${e.paidByName} <span style="font-size: 10px; color: var(--text-muted);">(Multi-Payer)</span>`;
+            }
+
+            return `
+              <tr>
+                <td>${formatDate(Number(e.date))}</td>
+                <td><strong>${e.description}</strong>${catBadge}</td>
+                <td>${paidByHtml}</td>
+                <td style="text-align: right; font-weight: 700; ${isPayment ? 'color: #10B981;' : (isAdjustment ? 'color: #F59E0B;' : '')}">
+                  ${formatCurrency(e.amount)}
+                  ${personId && e.totalExpenseAmount && Number(e.totalExpenseAmount) > Number(e.amount) ? `<div style="font-size: 10px; color: var(--text-muted); font-weight: normal;">Total: ${formatCurrency(e.totalExpenseAmount)}</div>` : ''}
+                </td>
+              </tr>
+            `;
+          }).join('')}
         </tbody>
       </table>
     </div>

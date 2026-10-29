@@ -271,17 +271,17 @@
               <input type="date" id="report-to-date" class="form-control">
             </div>
 
+            <div id="filter-person-group" style="display: none; align-items: center; gap: 8px;">
+              <label style="font-size: 13px; font-weight: 600;" id="report-person-label">Paid By:</label>
+              <select id="report-person-select" class="form-control" style="min-width: 180px;" onchange="generateActiveReport()">
+                <!-- dynamic options -->
+              </select>
+            </div>
+
             <div id="filter-batch-group" style="display: none; align-items: center; gap: 8px;">
               <label style="font-size: 13px; font-weight: 600;">Batch:</label>
               <select id="report-batch-select" class="form-control" style="min-width: 170px;" onchange="onReportBatchChange()">
                 <!-- dynamic options populated from /api/batches -->
-              </select>
-            </div>
-
-            <div id="filter-person-group" style="display: none; align-items: center; gap: 8px;">
-              <label style="font-size: 13px; font-weight: 600;">Member:</label>
-              <select id="report-person-select" class="form-control" style="min-width: 180px;" onchange="generateActiveReport()">
-                <!-- dynamic options -->
               </select>
             </div>
 
