@@ -61,11 +61,11 @@
           <span class="nav-icon">📊</span>
           <span>Dashboard</span>
         </div>
-        <div class="nav-item" onclick="switchView('expenses')">
+        <div class="nav-item" id="nav-expenses" onclick="switchView('expenses')">
           <span class="nav-icon">🧾</span>
           <span>Expenses List</span>
         </div>
-        <div class="nav-item" onclick="openExpenseModal()">
+        <div class="nav-item" id="nav-add-expense" onclick="openExpenseForm()">
           <span class="nav-icon">➕</span>
           <span>Add Expense</span>
         </div>
@@ -200,7 +200,7 @@
 
             <button class="btn btn-warning" style="background-color: #F59E0B; border-color: #F59E0B; color: white;" onclick="openOpeningAdjustmentModal()">⚖️ Opening Adjustment</button>
             <button class="btn btn-success" style="background-color: #10B981; border-color: #10B981; color: white;" onclick="openPaymentModal()">💳 Receive Payment</button>
-            <button class="btn btn-primary" onclick="openExpenseModal()">+ Add Expense</button>
+            <button class="btn btn-primary" onclick="openExpenseForm()">+ Add Expense</button>
           </div>
 
           <div class="table-container">
@@ -219,6 +219,147 @@
                 <!-- Dynamically populated -->
               </tbody>
             </table>
+          </div>
+        </section>
+
+        <!-- 2b. ADD / EDIT EXPENSE DEDICATED FULL VIEW (NOT A POPUP) -->
+        <section id="view-add-expense" class="app-view" style="display: none;">
+          <div style="max-width: 820px; margin: 0 auto;">
+            <!-- Header bar with title and Back button -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <button type="button" class="btn btn-secondary" onclick="switchView('expenses')" style="display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; font-weight: 500;">
+                  <span>← Back to Expenses List</span>
+                </button>
+                <h2 class="section-title" id="expense-form-title" style="margin: 0; font-size: 20px; color: var(--text-dark);">Add Expense</h2>
+              </div>
+            </div>
+
+            <!-- Form Card Container -->
+            <div class="card" style="padding: 24px 28px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px solid var(--card-border); box-shadow: var(--shadow-sm);">
+              <form id="expense-form" onsubmit="saveExpense(event)">
+                <input type="hidden" id="expense-edit-id" value="">
+                
+                <!-- Row 1: Date and Amount side by side -->
+                <div class="form-row-2col" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" style="font-weight: 600;">Date</label>
+                    <input type="date" id="expense-input-date" class="form-control" style="width: 100%; height: 42px;" required>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" style="font-weight: 600;">Amount (Rs.)</label>
+                    <input type="number" step="0.01" min="0.01" id="expense-input-amount" class="form-control" style="width: 100%; height: 42px; font-size: 16px; font-weight: bold;" placeholder="0.00" oninput="updateLiveSplitCalculation(); updateCustomSplitSummary(); updateMultiPayerSummary();" required>
+                  </div>
+                </div>
+
+                <!-- Description -->
+                <div class="form-group" style="margin-bottom: 16px;">
+                  <label class="form-label" style="font-weight: 600;">Description</label>
+                  <input type="text" id="expense-input-desc" class="form-control" style="width: 100%; height: 42px;" placeholder="e.g. Dinner Chicken Karahi, Sabzi, Milk, etc." required>
+                </div>
+
+                <!-- Category Tags (Breakfast, Lunch, Dinner, Others) -->
+                <div class="form-group" style="margin-bottom: 16px;">
+                  <label class="form-label" style="font-weight: 600;">Category (Optional meal tag)</label>
+                  <div class="category-chips">
+                    <button type="button" class="category-chip" data-category="Breakfast" onclick="toggleCategoryChip(this)">Breakfast</button>
+                    <button type="button" class="category-chip" data-category="Lunch" onclick="toggleCategoryChip(this)">Lunch</button>
+                    <button type="button" class="category-chip" data-category="Dinner" onclick="toggleCategoryChip(this)">Dinner</button>
+                    <button type="button" class="category-chip" data-category="Others" onclick="toggleCategoryChip(this)">Others</button>
+                  </div>
+                </div>
+
+                <!-- Paid By Section -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <label class="form-label" style="margin-bottom:0; font-weight: 600;">Paid By</label>
+                    <!-- Payer mode toggle -->
+                    <div class="split-mode-toggle">
+                      <button type="button" id="payer-mode-single-btn" class="split-mode-btn active" onclick="setPayerMode('single')">💰 Single</button>
+                      <button type="button" id="payer-mode-multi-btn" class="split-mode-btn" onclick="setPayerMode('multi')">👥 Multi</button>
+                    </div>
+                  </div>
+
+                  <!-- Single payer dropdown -->
+                  <div id="payer-single-section">
+                    <select id="expense-input-paid-by" class="form-control" style="width: 100%; height: 42px;" required>
+                      <!-- Populated dynamically -->
+                    </select>
+                  </div>
+
+                  <!-- Multi payer inputs -->
+                  <div id="payer-multi-section" style="display:none;">
+                    <div class="split-persons-box" id="multi-payer-list" style="max-height: 260px; overflow-y: auto;">
+                      <!-- Dynamically populated -->
+                    </div>
+                    <div style="margin-top:8px; padding:10px 14px; border-radius:8px; font-size:13px; background:var(--bg-secondary);">
+                      <div style="display:flex; justify-content:space-between;">
+                        <span>Total Expense:</span>
+                        <strong id="multi-payer-total-expense">Rs. 0.00</strong>
+                      </div>
+                      <div style="display:flex; justify-content:space-between;">
+                        <span>Sum Entered:</span>
+                        <strong id="multi-payer-entered">Rs. 0.00</strong>
+                      </div>
+                      <div style="display:flex; justify-content:space-between; margin-top:4px; font-weight:bold;">
+                        <span>Remaining:</span>
+                        <strong id="multi-payer-remaining" style="color:var(--danger)">Rs. 0.00</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Split Among Members Section -->
+                <div class="form-group" style="margin-bottom: 24px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <label class="form-label" style="margin-bottom: 0; font-weight: 600;">Split Among Members</label>
+                    <!-- Split Mode Toggle -->
+                    <div class="split-mode-toggle">
+                      <button type="button" id="split-mode-equal-btn" class="split-mode-btn active" onclick="setSplitMode('equal')">⚖️ Equal</button>
+                      <button type="button" id="split-mode-custom-btn" class="split-mode-btn" onclick="setSplitMode('custom')">✏️ Custom</button>
+                    </div>
+                  </div>
+
+                  <!-- Select All / Clear (only in equal mode) -->
+                  <div id="split-select-all-row" style="display: flex; gap: 8px; margin-bottom: 8px;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(true)">Select All</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(false)">Clear</button>
+                  </div>
+                  
+                  <div class="split-persons-box split-persons-grid" id="split-persons-list" style="max-height: 320px; overflow-y: auto;">
+                    <!-- Dynamically populated checkboxes or custom inputs -->
+                  </div>
+
+                  <!-- Live split indicator (equal mode) -->
+                  <div class="live-split-preview" id="live-split-preview" style="margin-top: 10px; padding: 10px 14px; border-radius: 8px;">
+                    <span>Per Person Share:</span>
+                    <strong id="live-split-amount">Rs. 0.00</strong>
+                  </div>
+
+                  <!-- Custom split total validation (custom mode) -->
+                  <div id="custom-split-summary" style="display:none; margin-top: 10px; padding: 10px 14px; border-radius: 8px; font-size: 13px; background: var(--bg-secondary);">
+                    <div style="display:flex; justify-content:space-between;">
+                      <span>Total Expense:</span>
+                      <strong id="custom-split-total-expense">Rs. 0.00</strong>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                      <span>Sum Entered:</span>
+                      <strong id="custom-split-entered">Rs. 0.00</strong>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-top: 4px; font-weight: bold;">
+                      <span>Remaining:</span>
+                      <strong id="custom-split-remaining" style="color: var(--danger)">Rs. 0.00</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Form Action Buttons -->
+                <div style="display: flex; justify-content: flex-end; gap: 12px; padding-top: 18px; border-top: 1px solid var(--card-border);">
+                  <button type="button" class="btn btn-secondary" onclick="switchView('expenses')" style="padding: 10px 20px; font-weight: 500;">Cancel</button>
+                  <button type="submit" class="btn btn-primary" id="expense-submit-btn" style="padding: 10px 24px; font-size: 15px; font-weight: 600;">Save Expense</button>
+                </div>
+              </form>
+            </div>
           </div>
         </section>
 
@@ -376,136 +517,6 @@
 
       </div>
     </main>
-  </div>
-
-  <!-- ADD / EDIT EXPENSE MODAL -->
-  <div id="expense-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3 class="modal-title" id="expense-modal-title">Add Expense</h3>
-        <button class="modal-close" onclick="closeExpenseModal()">&times;</button>
-      </div>
-      <form id="expense-form" onsubmit="saveExpense(event)">
-        <input type="hidden" id="expense-edit-id" value="">
-        <div class="modal-body">
-          
-          <!-- Row 1: Date and Amount side by side -->
-          <div class="form-row-2col" style="display: flex; gap: 12px; margin-bottom: 14px;">
-            <div class="form-group" style="flex: 1; margin-bottom: 0;">
-              <label class="form-label">Date</label>
-              <input type="date" id="expense-input-date" class="form-control" style="width: 100%;" required>
-            </div>
-            <div class="form-group" style="flex: 1; margin-bottom: 0;">
-              <label class="form-label">Amount (Rs.)</label>
-              <input type="number" step="0.01" min="0.01" id="expense-input-amount" class="form-control" style="width: 100%; font-size: 16px; font-weight: bold;" placeholder="0.00" oninput="updateLiveSplitCalculation(); updateCustomSplitSummary(); updateMultiPayerSummary();" required>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Description</label>
-            <input type="text" id="expense-input-desc" class="form-control" style="width: 100%;" placeholder="e.g. Dinner Chicken Karahi, Sabzi, Milk, etc." required>
-          </div>
-
-          <!-- Category Tags (Breakfast, Lunch, Dinner, Others) -->
-          <div class="form-group">
-            <label class="form-label">Category (Optional meal tag)</label>
-            <div class="category-chips">
-              <button type="button" class="category-chip" data-category="Breakfast" onclick="toggleCategoryChip(this)">Breakfast</button>
-              <button type="button" class="category-chip" data-category="Lunch" onclick="toggleCategoryChip(this)">Lunch</button>
-              <button type="button" class="category-chip" data-category="Dinner" onclick="toggleCategoryChip(this)">Dinner</button>
-              <button type="button" class="category-chip" data-category="Others" onclick="toggleCategoryChip(this)">Others</button>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <label class="form-label" style="margin-bottom:0;">Paid By</label>
-              <!-- Payer mode toggle -->
-              <div class="split-mode-toggle">
-                <button type="button" id="payer-mode-single-btn" class="split-mode-btn active" onclick="setPayerMode('single')">💰 Single</button>
-                <button type="button" id="payer-mode-multi-btn" class="split-mode-btn" onclick="setPayerMode('multi')">👥 Multi</button>
-              </div>
-            </div>
-
-            <!-- Single payer dropdown -->
-            <div id="payer-single-section">
-              <select id="expense-input-paid-by" class="form-control" style="width: 100%;" required>
-                <!-- Populated dynamically -->
-              </select>
-            </div>
-
-            <!-- Multi payer inputs -->
-            <div id="payer-multi-section" style="display:none;">
-              <div class="split-persons-box" id="multi-payer-list">
-                <!-- Dynamically populated -->
-              </div>
-              <div style="margin-top:8px; padding:8px 12px; border-radius:8px; font-size:13px; background:var(--bg-secondary);">
-                <div style="display:flex; justify-content:space-between;">
-                  <span>Total Expense:</span>
-                  <strong id="multi-payer-total-expense">Rs. 0.00</strong>
-                </div>
-                <div style="display:flex; justify-content:space-between;">
-                  <span>Sum Entered:</span>
-                  <strong id="multi-payer-entered">Rs. 0.00</strong>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-top:4px; font-weight:bold;">
-                  <span>Remaining:</span>
-                  <strong id="multi-payer-remaining" style="color:var(--danger)">Rs. 0.00</strong>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-              <label class="form-label" style="margin-bottom: 0;">Split Among Members</label>
-              <!-- Split Mode Toggle -->
-              <div class="split-mode-toggle">
-                <button type="button" id="split-mode-equal-btn" class="split-mode-btn active" onclick="setSplitMode('equal')">⚖️ Equal</button>
-                <button type="button" id="split-mode-custom-btn" class="split-mode-btn" onclick="setSplitMode('custom')">✏️ Custom</button>
-              </div>
-            </div>
-
-            <!-- Select All / Clear (only in equal mode) -->
-            <div id="split-select-all-row" style="display: flex; gap: 6px; margin-bottom: 6px;">
-              <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(true)">Select All</button>
-              <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(false)">Clear</button>
-            </div>
-            
-            <div class="split-persons-box split-persons-grid" id="split-persons-list">
-              <!-- Dynamically populated checkboxes or custom inputs -->
-            </div>
-
-            <!-- Live split indicator (equal mode) -->
-            <div class="live-split-preview" id="live-split-preview">
-              <span>Per Person Share:</span>
-              <strong id="live-split-amount">Rs. 0.00</strong>
-            </div>
-
-            <!-- Custom split total validation (custom mode) -->
-            <div id="custom-split-summary" style="display:none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: var(--bg-secondary);">
-              <div style="display:flex; justify-content:space-between;">
-                <span>Total Expense:</span>
-                <strong id="custom-split-total-expense">Rs. 0.00</strong>
-              </div>
-              <div style="display:flex; justify-content:space-between;">
-                <span>Sum Entered:</span>
-                <strong id="custom-split-entered">Rs. 0.00</strong>
-              </div>
-              <div style="display:flex; justify-content:space-between; margin-top: 4px; font-weight: bold;">
-                <span>Remaining:</span>
-                <strong id="custom-split-remaining" style="color: var(--danger)">Rs. 0.00</strong>
-              </div>
-            </div>
-          </div>
-
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" onclick="closeExpenseModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary" id="expense-submit-btn">Save Expense</button>
-        </div>
-      </form>
-    </div>
   </div>
 
   <!-- RECEIVE / RECORD PAYMENT MODAL -->

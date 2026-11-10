@@ -1496,5 +1496,9 @@ body.sidebar-collapsed .sidebar {
     max-height: 90vh;
     border-radius: 16px 16px 0 0;
   }
+  .form-row-2col {
+    grid-template-columns: 1fr !important;
+  }
 }
+
 

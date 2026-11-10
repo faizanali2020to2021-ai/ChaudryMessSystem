@@ -589,7 +589,7 @@ router.get('/expenses/:id', async (req, res) => {
     const expRes = await pool.request()
       .input('id', sql.BigInt, id)
       .query(`
-        SELECT e.id, e.expenseDate AS date, e.description, e.amount, e.paidByPersonId, e.category, p.name AS paidByName
+        SELECT e.id, e.expenseDate AS date, e.description, e.amount, e.paidByPersonId, e.category, e.splitMode, p.name AS paidByName
         FROM dbo.Expenses e
         LEFT JOIN dbo.Persons p ON p.id = e.paidByPersonId
         WHERE e.id = @id
@@ -692,6 +692,7 @@ router.post('/expenses', async (req, res) => {
     const expCompanyId = req.body.companyId ? parseInt(req.body.companyId, 10) : 1;
 
     // Insert expense
+    const expSplitMode = (splitMode === 'custom') ? 'custom' : 'equal';
     const insertExpReq = new sql.Request(transaction);
     insertExpReq.input('expenseDate', sql.BigInt, dateVal);
     insertExpReq.input('description', sql.NVarChar(500), description.trim());
@@ -700,11 +701,12 @@ router.post('/expenses', async (req, res) => {
     insertExpReq.input('category', sql.NVarChar(50), category || null);
     insertExpReq.input('batchId', sql.BigInt, targetBatchId || null);
     insertExpReq.input('companyId', sql.Int, expCompanyId);
+    insertExpReq.input('splitMode', sql.NVarChar(20), expSplitMode);
 
     const expResult = await insertExpReq.query(`
-      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId)
+      INSERT INTO dbo.Expenses (expenseDate, description, amount, paidByPersonId, category, batchId, companyId, splitMode)
       OUTPUT INSERTED.id
-      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId, @companyId)
+      VALUES (@expenseDate, @description, @amount, @paidByPersonId, @category, @batchId, @companyId, @splitMode)
     `);
     const expenseId = expResult.recordset[0].id;
 
@@ -1574,6 +1576,7 @@ router.put('/expenses/:id', async (req, res) => {
     await transaction.begin();
 
     // Update expense
+    const expSplitMode = (splitMode === 'custom') ? 'custom' : 'equal';
     const updateReq = new sql.Request(transaction);
     updateReq.input('id', sql.BigInt, expenseId);
     updateReq.input('expenseDate', sql.BigInt, dateVal);
@@ -1581,11 +1584,12 @@ router.put('/expenses/:id', async (req, res) => {
     updateReq.input('amount', sql.Decimal(18, 2), numAmount);
     updateReq.input('paidByPersonId', sql.BigInt, primaryPayer);
     updateReq.input('category', sql.NVarChar(50), category || null);
+    updateReq.input('splitMode', sql.NVarChar(20), expSplitMode);
 
     await updateReq.query(`
       UPDATE dbo.Expenses
       SET expenseDate = @expenseDate, description = @description, amount = @amount,
-          paidByPersonId = @paidByPersonId, category = @category
+          paidByPersonId = @paidByPersonId, category = @category, splitMode = @splitMode
       WHERE id = @id
     `);
 

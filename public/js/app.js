@@ -349,15 +349,22 @@ function switchView(viewName) {
   const viewTitles = {
     'dashboard': 'Dashboard',
     'expenses': 'Expenses List',
+    'add-expense': 'Add Expense',
     'persons': 'Persons',
     'reports': 'Reports',
     'settings': 'Settings & Backup'
   };
 
-  const currentNav = Array.from(navItems).find(item => item.textContent.trim().toLowerCase().includes(viewName));
+  let currentNav = null;
+  if (viewName === 'add-expense') {
+    currentNav = document.getElementById('nav-add-expense') || Array.from(navItems).find(item => item.textContent.toLowerCase().includes('add expense'));
+  } else {
+    currentNav = Array.from(navItems).find(item => item.textContent.trim().toLowerCase().includes(viewName));
+  }
   if (currentNav) currentNav.classList.add('active');
 
-  document.getElementById('page-title').textContent = viewTitles[viewName] || 'Dashboard';
+  const pageTitleEl = document.getElementById('page-title');
+  if (pageTitleEl) pageTitleEl.textContent = viewTitles[viewName] || 'Dashboard';
 
   // Toggle sections
   document.querySelectorAll('.app-view').forEach(v => v.style.display = 'none');
@@ -371,6 +378,13 @@ function switchView(viewName) {
   if (viewName === 'dashboard') loadDashboard();
   if (viewName === 'expenses') {
     populateBatchFilter().then(() => loadExpenses());
+  }
+  if (viewName === 'add-expense') {
+    const editId = document.getElementById('expense-edit-id');
+    // If opening add-expense fresh without an edit in progress
+    if (!editId || !editId.value) {
+      openExpenseForm(null);
+    }
   }
   if (viewName === 'persons') loadPersonsTable();
   if (viewName === 'reports') {
@@ -931,7 +945,7 @@ async function loadExpenses() {
           ${amountSubHtml}
         </td>
         <td style="text-align: center;">
-          <button class="btn btn-secondary btn-sm" onclick="openExpenseModal(${e.id})">Edit</button>
+          <button class="btn btn-secondary btn-sm" onclick="openExpenseForm(${e.id})">Edit</button>
           ${isAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">Delete</button>` : ''}
         </td>
       `;
@@ -1099,28 +1113,42 @@ function updateMultiPayerSummary() {
   }
 }
 
-function openExpenseModal(expenseId = null) {
-  const modal = document.getElementById('expense-modal');
-  const title = document.getElementById('expense-modal-title');
+function isSharesUnequal(shares, totalAmount) {
+  if (!shares || shares.length === 0) return false;
+  const numTotal = parseFloat(totalAmount) || 0;
+  const expectedEqual = numTotal / shares.length;
+  return shares.some(s => Math.abs(parseFloat(s.shareAmount) - expectedEqual) > 0.10);
+}
+
+function openExpenseForm(expenseId = null) {
+  switchView('add-expense');
+
+  const title = document.getElementById('expense-form-title');
   const editId = document.getElementById('expense-edit-id');
   const dateInput = document.getElementById('expense-input-date');
   const descInput = document.getElementById('expense-input-desc');
   const amountInput = document.getElementById('expense-input-amount');
   const paidByInput = document.getElementById('expense-input-paid-by');
+  const submitBtn = document.getElementById('expense-submit-btn');
 
   populatePersonSelects();
 
   if (expenseId) {
-    title.textContent = 'Edit Expense';
-    editId.value = expenseId;
+    if (title) title.textContent = 'Edit Expense';
+    if (submitBtn) submitBtn.textContent = 'Update Expense';
+    if (editId) editId.value = expenseId;
+
     fetch(`/api/expenses/${expenseId}`)
       .then(r => r.json())
       .then(data => {
-        if (!data.success) return;
+        if (!data.success) {
+          alert('Could not load expense: ' + (data.message || 'Unknown error'));
+          return;
+        }
         const exp = data.expense;
-        dateInput.value = toInputDate(Number(exp.date));
-        descInput.value = exp.description;
-        amountInput.value = exp.amount;
+        if (dateInput) dateInput.value = toInputDate(Number(exp.date));
+        if (descInput) descInput.value = exp.description;
+        if (amountInput) amountInput.value = exp.amount;
 
         // Set category chip
         state.selectedCategory = exp.category || null;
@@ -1129,55 +1157,97 @@ function openExpenseModal(expenseId = null) {
         // Restore payer mode from saved payers
         const payers = data.payers || [];
         if (payers.length > 1) {
-          // Multi-payer
           setPayerMode('multi');
           const existingMap = {};
           payers.forEach(p => { existingMap[Number(p.personId)] = parseFloat(p.amountPaid); });
           renderMultiPayerInputs(existingMap);
         } else {
           setPayerMode('single');
-          paidByInput.value = exp.paidByPersonId;
+          if (paidByInput) paidByInput.value = exp.paidByPersonId;
         }
 
-        // Render split checkboxes with selected person IDs
-        const sharedPersonIds = new Set(data.shares.map(s => Number(s.personId)));
-        renderSplitCheckboxes(sharedPersonIds);
-        updateLiveSplitCalculation();
+        // Restore Split Mode: check if saved as custom or unequal shares
+        const shares = data.shares || [];
+        const isCustom = exp.splitMode === 'custom' || (
+          shares.length > 0 && isSharesUnequal(shares, exp.amount)
+        );
+
+        if (isCustom) {
+          currentSplitMode = 'custom';
+          const eqBtn = document.getElementById('split-mode-equal-btn');
+          const custBtn = document.getElementById('split-mode-custom-btn');
+          if (eqBtn) eqBtn.classList.remove('active');
+          if (custBtn) custBtn.classList.add('active');
+
+          const selAllRow = document.getElementById('split-select-all-row');
+          const liveSplit = document.getElementById('live-split-preview');
+          const custSummary = document.getElementById('custom-split-summary');
+          if (selAllRow) selAllRow.style.display = 'none';
+          if (liveSplit) liveSplit.style.display = 'none';
+          if (custSummary) custSummary.style.display = 'block';
+
+          const existingSharesMap = {};
+          shares.forEach(s => {
+            existingSharesMap[Number(s.personId)] = parseFloat(s.shareAmount);
+          });
+          const selectedIds = new Set(shares.map(s => Number(s.personId)));
+          renderCustomSplitInputs(selectedIds, existingSharesMap);
+          updateCustomSplitSummary();
+        } else {
+          currentSplitMode = 'equal';
+          const eqBtn = document.getElementById('split-mode-equal-btn');
+          const custBtn = document.getElementById('split-mode-custom-btn');
+          if (eqBtn) eqBtn.classList.add('active');
+          if (custBtn) custBtn.classList.remove('active');
+
+          const selAllRow = document.getElementById('split-select-all-row');
+          const liveSplit = document.getElementById('live-split-preview');
+          const custSummary = document.getElementById('custom-split-summary');
+          if (selAllRow) selAllRow.style.display = 'flex';
+          if (liveSplit) liveSplit.style.display = 'flex';
+          if (custSummary) custSummary.style.display = 'none';
+
+          const sharedPersonIds = new Set(shares.map(s => Number(s.personId)));
+          renderSplitCheckboxes(sharedPersonIds.size > 0 ? sharedPersonIds : new Set(state.persons.map(p => Number(p.id))));
+          updateLiveSplitCalculation();
+        }
       });
   } else {
-    title.textContent = 'Add Expense';
-    editId.value = '';
-    dateInput.value = toInputDate(new Date());
-    descInput.value = '';
-    amountInput.value = '';
+    if (title) title.textContent = 'Add Expense';
+    if (submitBtn) submitBtn.textContent = 'Save Expense';
+    if (editId) editId.value = '';
+    if (dateInput) dateInput.value = toInputDate(new Date());
+    if (descInput) descInput.value = '';
+    if (amountInput) amountInput.value = '';
     state.selectedCategory = null;
     updateCategoryChips();
+    setPayerMode('single');
 
-    // Default: select all active members for split
+    currentSplitMode = 'equal';
+    const eqBtn = document.getElementById('split-mode-equal-btn');
+    const custBtn = document.getElementById('split-mode-custom-btn');
+    if (eqBtn) eqBtn.classList.add('active');
+    if (custBtn) custBtn.classList.remove('active');
+
+    const selAllRow = document.getElementById('split-select-all-row');
+    const liveSplit = document.getElementById('live-split-preview');
+    const custSummary = document.getElementById('custom-split-summary');
+    if (selAllRow) selAllRow.style.display = 'flex';
+    if (liveSplit) liveSplit.style.display = 'flex';
+    if (custSummary) custSummary.style.display = 'none';
+
     renderSplitCheckboxes(new Set(state.persons.map(p => Number(p.id))));
     updateLiveSplitCalculation();
   }
+}
 
-  // Always reset payer mode to single when opening modal (unless set above in edit)
-  if (!expenseId) {
-    setPayerMode('single');
-  }
-
-  // Always reset to equal split mode when opening modal
-  currentSplitMode = 'equal';
-  document.getElementById('split-mode-equal-btn').classList.add('active');
-  document.getElementById('split-mode-custom-btn').classList.remove('active');
-  document.getElementById('split-select-all-row').style.display = 'flex';
-  document.getElementById('live-split-preview').style.display = 'flex';
-  document.getElementById('custom-split-summary').style.display = 'none';
-
-  modal.style.display = 'flex';
+function openExpenseModal(expenseId = null) {
+  openExpenseForm(expenseId);
 }
 
 function closeExpenseModal() {
-  document.getElementById('expense-modal').style.display = 'none';
+  switchView('expenses');
 }
-
 
 function toggleCategoryChip(btn) {
   const cat = btn.getAttribute('data-category');
@@ -1205,17 +1275,20 @@ let currentSplitMode = 'equal';
 
 function setSplitMode(mode) {
   currentSplitMode = mode;
-  document.getElementById('split-mode-equal-btn').classList.toggle('active', mode === 'equal');
-  document.getElementById('split-mode-custom-btn').classList.toggle('active', mode === 'custom');
+  const eqBtn = document.getElementById('split-mode-equal-btn');
+  const custBtn = document.getElementById('split-mode-custom-btn');
+  if (eqBtn) eqBtn.classList.toggle('active', mode === 'equal');
+  if (custBtn) custBtn.classList.toggle('active', mode === 'custom');
 
-  // Toggle visibility of controls
-  document.getElementById('split-select-all-row').style.display = mode === 'equal' ? 'flex' : 'none';
-  document.getElementById('live-split-preview').style.display = mode === 'equal' ? 'flex' : 'none';
-  document.getElementById('custom-split-summary').style.display = mode === 'custom' ? 'block' : 'none';
+  const selAllRow = document.getElementById('split-select-all-row');
+  const liveSplit = document.getElementById('live-split-preview');
+  const custSummary = document.getElementById('custom-split-summary');
+  if (selAllRow) selAllRow.style.display = mode === 'equal' ? 'flex' : 'none';
+  if (liveSplit) liveSplit.style.display = mode === 'equal' ? 'flex' : 'none';
+  if (custSummary) custSummary.style.display = mode === 'custom' ? 'block' : 'none';
 
   // Re-render persons list in new mode
   if (mode === 'equal') {
-    // Keep current checked state from custom mode — collect which persons had non-zero amounts
     const customInputs = document.querySelectorAll('.custom-split-input');
     const selectedIds = new Set();
     customInputs.forEach(inp => {
@@ -1224,17 +1297,18 @@ function setSplitMode(mode) {
     renderSplitCheckboxes(selectedIds.size > 0 ? selectedIds : new Set(state.persons.map(p => Number(p.id))));
     updateLiveSplitCalculation();
   } else {
-    // Switch to custom: carry over checked persons from equal mode
+    // Switch to custom: keep inputs EMPTY so user types custom amounts manually!
     const checkedIds = new Set(
       Array.from(document.querySelectorAll('.split-checkbox:checked')).map(cb => Number(cb.value))
     );
-    renderCustomSplitInputs(checkedIds);
+    renderCustomSplitInputs(checkedIds, null);
     updateCustomSplitSummary();
   }
 }
 
 function renderSplitCheckboxes(selectedIds) {
   const container = document.getElementById('split-persons-list');
+  if (!container) return;
   container.className = 'split-persons-box split-persons-grid';
   container.innerHTML = '';
 
@@ -1250,27 +1324,36 @@ function renderSplitCheckboxes(selectedIds) {
   });
 }
 
-function renderCustomSplitInputs(selectedIds) {
+function renderCustomSplitInputs(selectedIds = new Set(), existingSharesMap = null) {
   const container = document.getElementById('split-persons-list');
+  if (!container) return;
   container.className = 'split-persons-box';
   container.innerHTML = '';
-  const totalAmount = parseFloat(document.getElementById('expense-input-amount').value) || 0;
-  const count = selectedIds.size || state.persons.length;
-  const defaultShare = count > 0 ? Math.round((totalAmount / count) * 100) / 100 : 0;
 
   state.persons.forEach(p => {
-    const included = selectedIds.size === 0 || selectedIds.has(Number(p.id));
+    const pId = Number(p.id);
+    let val = '';
+    if (existingSharesMap && existingSharesMap[pId] !== undefined) {
+      val = existingSharesMap[pId] > 0 ? existingSharesMap[pId] : '';
+    }
+
     const row = document.createElement('div');
     row.className = 'split-person-row custom';
+    row.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--card-border); gap: 12px;';
     row.innerHTML = `
-      <span style="font-size:14px;">${p.name}</span>
-      <input type="number" step="0.01" min="0" placeholder="0.00"
-        class="custom-split-input" data-person-id="${p.id}"
-        value="${included && defaultShare > 0 ? defaultShare : ''}"
-        oninput="updateCustomSplitSummary()">
+      <span style="font-size: 14px; font-weight: 500; color: var(--text-dark);">${p.name}</span>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Rs.</span>
+        <input type="number" step="0.01" min="0" placeholder="0.00"
+          class="form-control custom-split-input" data-person-id="${p.id}"
+          value="${val}"
+          style="width: 130px; text-align: right; font-weight: 600; height: 38px;"
+          oninput="updateCustomSplitSummary()">
+      </div>
     `;
     container.appendChild(row);
   });
+  updateCustomSplitSummary();
 }
 
 function selectAllSplit(select) {
