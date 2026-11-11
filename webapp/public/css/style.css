@@ -769,6 +769,24 @@ body.sidebar-collapsed .sidebar {
   gap: 6px 12px;
 }
 
+.expense-form-grid {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .expense-form-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px;
+  }
+}
+
+#view-add-expense .split-persons-box {
+  max-height: 440px;
+}
+
 @media (max-width: 420px) {
   .split-persons-grid {
     grid-template-columns: 1fr;

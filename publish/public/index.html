@@ -223,23 +223,34 @@
         </section>
 
         <!-- 2b. ADD / EDIT EXPENSE DEDICATED FULL VIEW (NOT A POPUP) -->
-        <section id="view-add-expense" class="app-view" style="display: none;">
-          <div style="max-width: 820px; margin: 0 auto;">
-            <!-- Header bar with title and Back button -->
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
-              <div style="display: flex; align-items: center; gap: 12px;">
-                <button type="button" class="btn btn-secondary" onclick="switchView('expenses')" style="display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; font-weight: 500;">
-                  <span>← Back to Expenses List</span>
-                </button>
-                <h2 class="section-title" id="expense-form-title" style="margin: 0; font-size: 20px; color: var(--text-dark);">Add Expense</h2>
-              </div>
+        <section id="view-add-expense" class="app-view" style="display: none; width: 100%;">
+          <!-- Header Toolbar spanning full width -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 14px; background: var(--bg-card); padding: 14px 22px; border-radius: var(--radius-lg); border: 1px solid var(--card-border); box-shadow: var(--shadow-sm);">
+            <div style="display: flex; align-items: center; gap: 14px;">
+              <button type="button" class="btn btn-secondary" onclick="switchView('expenses')" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; font-weight: 600;">
+                <span>← Back to Expenses List</span>
+              </button>
+              <h2 class="section-title" id="expense-form-title" style="margin: 0; font-size: 20px; color: var(--text-dark);">Add Expense</h2>
             </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <button type="button" class="btn btn-secondary" onclick="switchView('expenses')" style="padding: 8px 18px; font-weight: 500;">Cancel</button>
+              <button type="button" class="btn btn-primary" id="expense-submit-btn-top" onclick="submitExpenseForm()" style="padding: 8px 24px; font-size: 15px; font-weight: 600;">💾 Save Expense</button>
+            </div>
+          </div>
 
-            <!-- Form Card Container -->
-            <div class="card" style="padding: 24px 28px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px solid var(--card-border); box-shadow: var(--shadow-sm);">
-              <form id="expense-form" onsubmit="saveExpense(event)">
-                <input type="hidden" id="expense-edit-id" value="">
-                
+          <form id="expense-form" onsubmit="saveExpense(event)">
+            <input type="hidden" id="expense-edit-id" value="">
+            
+            <!-- 2-Column Responsive Grid occupying the full available space -->
+            <div class="expense-form-grid" style="margin-bottom: 20px;">
+              
+              <!-- LEFT COLUMN: Expense Details & Payer -->
+              <div class="card" style="padding: 24px 28px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px solid var(--card-border); box-shadow: var(--shadow-sm);">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--card-border);">
+                  <span style="font-size: 18px;">📝</span>
+                  <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: var(--text-dark);">Expense Information</h3>
+                </div>
+
                 <!-- Row 1: Date and Amount side by side -->
                 <div class="form-row-2col" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
                   <div class="form-group" style="margin-bottom: 0;">
@@ -259,7 +270,7 @@
                 </div>
 
                 <!-- Category Tags (Breakfast, Lunch, Dinner, Others) -->
-                <div class="form-group" style="margin-bottom: 16px;">
+                <div class="form-group" style="margin-bottom: 18px;">
                   <label class="form-label" style="font-weight: 600;">Category (Optional meal tag)</label>
                   <div class="category-chips">
                     <button type="button" class="category-chip" data-category="Breakfast" onclick="toggleCategoryChip(this)">Breakfast</button>
@@ -270,8 +281,8 @@
                 </div>
 
                 <!-- Paid By Section -->
-                <div class="form-group" style="margin-bottom: 20px;">
-                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                     <label class="form-label" style="margin-bottom:0; font-weight: 600;">Paid By</label>
                     <!-- Payer mode toggle -->
                     <div class="split-mode-toggle">
@@ -289,15 +300,15 @@
 
                   <!-- Multi payer inputs -->
                   <div id="payer-multi-section" style="display:none;">
-                    <div class="split-persons-box" id="multi-payer-list" style="max-height: 260px; overflow-y: auto;">
+                    <div class="split-persons-box" id="multi-payer-list" style="max-height: 280px; overflow-y: auto;">
                       <!-- Dynamically populated -->
                     </div>
-                    <div style="margin-top:8px; padding:10px 14px; border-radius:8px; font-size:13px; background:var(--bg-secondary);">
+                    <div style="margin-top:10px; padding:12px 16px; border-radius:8px; font-size:13px; background:var(--bg-secondary);">
                       <div style="display:flex; justify-content:space-between;">
                         <span>Total Expense:</span>
                         <strong id="multi-payer-total-expense">Rs. 0.00</strong>
                       </div>
-                      <div style="display:flex; justify-content:space-between;">
+                      <div style="display:flex; justify-content:space-between; margin-top:2px;">
                         <span>Sum Entered:</span>
                         <strong id="multi-payer-entered">Rs. 0.00</strong>
                       </div>
@@ -308,59 +319,63 @@
                     </div>
                   </div>
                 </div>
+              </div>
 
-                <!-- Split Among Members Section -->
-                <div class="form-group" style="margin-bottom: 24px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <label class="form-label" style="margin-bottom: 0; font-weight: 600;">Split Among Members</label>
-                    <!-- Split Mode Toggle -->
-                    <div class="split-mode-toggle">
-                      <button type="button" id="split-mode-equal-btn" class="split-mode-btn active" onclick="setSplitMode('equal')">⚖️ Equal</button>
-                      <button type="button" id="split-mode-custom-btn" class="split-mode-btn" onclick="setSplitMode('custom')">✏️ Custom</button>
-                    </div>
+              <!-- RIGHT COLUMN: Split Among Members -->
+              <div class="card" style="padding: 24px 28px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px solid var(--card-border); box-shadow: var(--shadow-sm);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--card-border); flex-wrap: wrap; gap: 8px;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 18px;">⚖️</span>
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: var(--text-dark);">Split Among Members</h3>
                   </div>
-
-                  <!-- Select All / Clear (only in equal mode) -->
-                  <div id="split-select-all-row" style="display: flex; gap: 8px; margin-bottom: 8px;">
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(true)">Select All</button>
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(false)">Clear</button>
-                  </div>
-                  
-                  <div class="split-persons-box split-persons-grid" id="split-persons-list" style="max-height: 320px; overflow-y: auto;">
-                    <!-- Dynamically populated checkboxes or custom inputs -->
-                  </div>
-
-                  <!-- Live split indicator (equal mode) -->
-                  <div class="live-split-preview" id="live-split-preview" style="margin-top: 10px; padding: 10px 14px; border-radius: 8px;">
-                    <span>Per Person Share:</span>
-                    <strong id="live-split-amount">Rs. 0.00</strong>
-                  </div>
-
-                  <!-- Custom split total validation (custom mode) -->
-                  <div id="custom-split-summary" style="display:none; margin-top: 10px; padding: 10px 14px; border-radius: 8px; font-size: 13px; background: var(--bg-secondary);">
-                    <div style="display:flex; justify-content:space-between;">
-                      <span>Total Expense:</span>
-                      <strong id="custom-split-total-expense">Rs. 0.00</strong>
-                    </div>
-                    <div style="display:flex; justify-content:space-between;">
-                      <span>Sum Entered:</span>
-                      <strong id="custom-split-entered">Rs. 0.00</strong>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; margin-top: 4px; font-weight: bold;">
-                      <span>Remaining:</span>
-                      <strong id="custom-split-remaining" style="color: var(--danger)">Rs. 0.00</strong>
-                    </div>
+                  <!-- Split Mode Toggle -->
+                  <div class="split-mode-toggle">
+                    <button type="button" id="split-mode-equal-btn" class="split-mode-btn active" onclick="setSplitMode('equal')">⚖️ Equal</button>
+                    <button type="button" id="split-mode-custom-btn" class="split-mode-btn" onclick="setSplitMode('custom')">✏️ Custom</button>
                   </div>
                 </div>
 
-                <!-- Form Action Buttons -->
-                <div style="display: flex; justify-content: flex-end; gap: 12px; padding-top: 18px; border-top: 1px solid var(--card-border);">
-                  <button type="button" class="btn btn-secondary" onclick="switchView('expenses')" style="padding: 10px 20px; font-weight: 500;">Cancel</button>
-                  <button type="submit" class="btn btn-primary" id="expense-submit-btn" style="padding: 10px 24px; font-size: 15px; font-weight: 600;">Save Expense</button>
+                <!-- Select All / Clear (only in equal mode) -->
+                <div id="split-select-all-row" style="display: flex; gap: 8px; margin-bottom: 12px;">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(true)">Select All</button>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllSplit(false)">Clear</button>
                 </div>
-              </form>
+                
+                <div class="split-persons-box split-persons-grid" id="split-persons-list" style="max-height: 420px; overflow-y: auto;">
+                  <!-- Dynamically populated checkboxes or custom inputs -->
+                </div>
+
+                <!-- Live split indicator (equal mode) -->
+                <div class="live-split-preview" id="live-split-preview" style="margin-top: 14px; padding: 12px 16px; border-radius: 8px;">
+                  <span>Per Person Share:</span>
+                  <strong id="live-split-amount">Rs. 0.00</strong>
+                </div>
+
+                <!-- Custom split total validation (custom mode) -->
+                <div id="custom-split-summary" style="display:none; margin-top: 14px; padding: 12px 16px; border-radius: 8px; font-size: 13px; background: var(--bg-secondary);">
+                  <div style="display:flex; justify-content:space-between;">
+                    <span>Total Expense:</span>
+                    <strong id="custom-split-total-expense">Rs. 0.00</strong>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; margin-top:2px;">
+                    <span>Sum Entered:</span>
+                    <strong id="custom-split-entered">Rs. 0.00</strong>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; margin-top: 4px; font-weight: bold;">
+                    <span>Remaining:</span>
+                    <strong id="custom-split-remaining" style="color: var(--danger)">Rs. 0.00</strong>
+                  </div>
+                </div>
+              </div>
+
             </div>
-          </div>
+
+            <!-- Form Action Footer (Bottom Bar spanning full width) -->
+            <div style="display: flex; justify-content: flex-end; gap: 14px; padding: 16px 22px; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px solid var(--card-border); box-shadow: var(--shadow-sm);">
+              <button type="button" class="btn btn-secondary" onclick="switchView('expenses')" style="padding: 10px 22px; font-weight: 500;">Cancel</button>
+              <button type="submit" class="btn btn-primary" id="expense-submit-btn" style="padding: 10px 28px; font-size: 15px; font-weight: 600;">💾 Save Expense</button>
+            </div>
+          </form>
         </section>
 
         <!-- 3. PERSONS MANAGEMENT VIEW -->

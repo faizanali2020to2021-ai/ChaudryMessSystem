@@ -1120,6 +1120,17 @@ function isSharesUnequal(shares, totalAmount) {
   return shares.some(s => Math.abs(parseFloat(s.shareAmount) - expectedEqual) > 0.10);
 }
 
+function submitExpenseForm() {
+  const form = document.getElementById('expense-form');
+  if (form) {
+    if (typeof form.requestSubmit === 'function') {
+      form.requestSubmit();
+    } else {
+      form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+    }
+  }
+}
+
 function openExpenseForm(expenseId = null) {
   switchView('add-expense');
 
@@ -1129,13 +1140,13 @@ function openExpenseForm(expenseId = null) {
   const descInput = document.getElementById('expense-input-desc');
   const amountInput = document.getElementById('expense-input-amount');
   const paidByInput = document.getElementById('expense-input-paid-by');
-  const submitBtn = document.getElementById('expense-submit-btn');
+  const submitBtns = [document.getElementById('expense-submit-btn'), document.getElementById('expense-submit-btn-top')].filter(Boolean);
 
   populatePersonSelects();
 
   if (expenseId) {
     if (title) title.textContent = 'Edit Expense';
-    if (submitBtn) submitBtn.textContent = 'Update Expense';
+    submitBtns.forEach(b => { b.textContent = 'Update Expense'; });
     if (editId) editId.value = expenseId;
 
     fetch(`/api/expenses/${expenseId}`)
@@ -1214,7 +1225,7 @@ function openExpenseForm(expenseId = null) {
       });
   } else {
     if (title) title.textContent = 'Add Expense';
-    if (submitBtn) submitBtn.textContent = 'Save Expense';
+    submitBtns.forEach(b => { b.textContent = 'Save Expense'; });
     if (editId) editId.value = '';
     if (dateInput) dateInput.value = toInputDate(new Date());
     if (descInput) descInput.value = '';
@@ -1473,13 +1484,13 @@ async function saveExpense(e) {
 
   const payload = { dateMillis, description, amount, category, ...payerPayload, ...splitPayload };
 
-  const btn = document.getElementById('expense-submit-btn');
-  const origText = btn ? btn.textContent : 'Save Expense';
+  const submitBtns = [document.getElementById('expense-submit-btn'), document.getElementById('expense-submit-btn-top')].filter(Boolean);
+  const origText = submitBtns.length > 0 ? submitBtns[0].textContent : 'Save Expense';
   isSavingExpense = true;
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Saving...';
-  }
+  submitBtns.forEach(b => {
+    b.disabled = true;
+    b.textContent = 'Saving...';
+  });
 
   try {
     const url = id ? `/api/expenses/${id}` : '/api/expenses';
@@ -1504,10 +1515,10 @@ async function saveExpense(e) {
     alert('Failed to save expense: ' + err.message);
   } finally {
     isSavingExpense = false;
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = origText;
-    }
+    submitBtns.forEach(b => {
+      b.disabled = false;
+      b.textContent = origText;
+    });
   }
 }
 
